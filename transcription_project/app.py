@@ -9,6 +9,7 @@ Then open http://localhost:5000 in your browser.
 
 import os
 import re
+import sys
 import threading
 import time
 import uuid
@@ -51,12 +52,13 @@ app = Flask(__name__)
 #   id: str
 #   status: "running" | "done"
 #   source_language: str
-#   target_language: str
-#   prompt: str               # the transcription prompt used for this batch
+#   prompt: str               # the (hardcoded) transcription prompt used for this batch
 #   started_at: iso timestamp
 #   videos: list of dicts, each with:
-#       index, link, status, step, elapsed_seconds, started_at, finished_at,
-#       error, transcript_file, translation_file, log (list of strings)
+#       index, link, title, status, step, elapsed_seconds, started_at, finished_at,
+#       error, transcript_file, translation_file (always None), log (list of strings)
+# NOTE: target_language was removed when translation was disabled. translation_file
+# is preserved on each video dict but always None.
 BATCH_LOCK = threading.Lock()
 BATCH = None  # type: dict | None
 
@@ -84,6 +86,25 @@ def safe_slug(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]+", "_", s).strip("_") or "file"
 
 
+def filename_prefix(video: dict) -> str:
+    """
+    Decide the filename prefix for a video's output files.
+
+    If the user provided a title with at least one alphanumeric character, slug
+    it and use that. Otherwise fall back to the original 'videoN' pattern.
+    Truncated to 80 chars to keep filenames sane.
+    """
+    title = (video.get("title") or "").strip()
+    fallback = f"video{video['index']}"
+    if not title:
+        return fallback
+    # Reject titles that have no alphanumeric content (slug would be the
+    # safe_slug 'file' fallback, which is uglier than videoN).
+    if not re.search(r"[a-zA-Z0-9]", title):
+        return fallback
+    return safe_slug(title)[:80] or fallback
+
+
 def download_drive_video(link: str, target_path: Path, log) -> Path:
     """Download a public Google Drive video to target_path. Returns the actual path used."""
     file_id = extract_drive_id(link)
@@ -107,9 +128,90 @@ def download_drive_video(link: str, target_path: Path, log) -> Path:
 
 
 def write_output_file(content: str, filename: str) -> Path:
+    """
+    Write a transcript output file. CSV files are written with a UTF-8 BOM so
+    that Excel opens them correctly without mojibake on Devanagari/Tamil/etc.
+    Google Sheets ignores the BOM, so this is harmless for that workflow.
+    """
     path = OUTPUTS_DIR / filename
-    path.write_text(content, encoding="utf-8")
+    if filename.lower().endswith(".csv"):
+        path.write_text(content, encoding="utf-8-sig")
+    else:
+        path.write_text(content, encoding="utf-8")
     return path
+
+
+# -------------------------------------------------------------------
+# Downloads folder cleanup
+# -------------------------------------------------------------------
+def get_downloads_info() -> dict:
+    """Return current file count and total size of the downloads/ folder."""
+    files = [p for p in DOWNLOADS_DIR.iterdir() if p.is_file()]
+    total_bytes = sum(p.stat().st_size for p in files)
+    return {
+        "file_count": len(files),
+        "total_bytes": total_bytes,
+        "total_mb": round(total_bytes / (1024 * 1024), 1),
+    }
+
+
+def _files_reserved_for_current_batch() -> set[str]:
+    """
+    Return the set of download filenames that belong to failed videos in the
+    current batch (which might be retried). These should NOT be deleted by
+    a safe cleanup.
+    """
+    reserved = set()
+    with BATCH_LOCK:
+        if not BATCH:
+            return reserved
+        batch_id = BATCH["id"]
+        for v in BATCH["videos"]:
+            # Failed videos may be retried, and retry reuses the existing file.
+            # Running videos obviously shouldn't have their file yanked.
+            if v["status"] in ("failed", "running"):
+                reserved.add(f"batch_{batch_id}_video_{v['index']}.mp4")
+    return reserved
+
+
+def cleanup_downloads(force: bool = False) -> dict:
+    """
+    Delete files in the downloads/ folder.
+
+    Args:
+        force: if True, delete all files. If False (default), skip files that
+               belong to failed videos in the current batch (preserves retry capability).
+
+    Returns:
+        Dict with 'deleted_count', 'deleted_mb', 'skipped_count', 'errors' (list of strings).
+    """
+    reserved = set() if force else _files_reserved_for_current_batch()
+
+    deleted_count = 0
+    deleted_bytes = 0
+    skipped_count = 0
+    errors = []
+
+    for path in DOWNLOADS_DIR.iterdir():
+        if not path.is_file():
+            continue
+        if path.name in reserved:
+            skipped_count += 1
+            continue
+        try:
+            size = path.stat().st_size
+            path.unlink()
+            deleted_count += 1
+            deleted_bytes += size
+        except Exception as e:
+            errors.append(f"{path.name}: {e}")
+
+    return {
+        "deleted_count": deleted_count,
+        "deleted_mb": round(deleted_bytes / (1024 * 1024), 1),
+        "skipped_count": skipped_count,
+        "errors": errors,
+    }
 
 
 # -------------------------------------------------------------------
@@ -124,9 +226,7 @@ def run_batch(batch_id: str):
             return
         videos = BATCH["videos"]
         source_lang = BATCH["source_language"]
-        target_lang = BATCH["target_language"]
         prompt = BATCH["prompt"]
-        needs_translation = source_lang != target_lang
 
     for video in videos:
         idx = video["index"]
@@ -160,39 +260,27 @@ def run_batch(batch_id: str):
             transcript = transcribe.transcribe_video(
                 str(local_video_path),
                 source_language=source_lang,
+                video_title=video.get("title", ""),
                 prompt=prompt,
                 log_callback=log,
             )
-            transcript_filename = f"video{idx}_{safe_slug(source_lang)}_transcript.txt"
+            transcript_filename = f"{filename_prefix(video)}_{safe_slug(source_lang)}_transcript.csv"
             write_output_file(transcript, transcript_filename)
             with BATCH_LOCK:
                 video["transcript_file"] = transcript_filename
             log(f"Transcript saved: {transcript_filename} ({len(transcript)} chars)")
 
-            # Sanity check: flag suspiciously short transcripts.
-            if len(transcript) < 500:
+            # Sanity check: flag suspiciously short transcripts. The CSV format
+            # is much longer than the previous plain-text format, so the
+            # threshold is higher here than it was before.
+            if len(transcript) < 2000:
                 log(
-                    "WARNING: transcript is under 500 characters, which is short for a "
-                    "60-minute video. You may want to retry."
+                    "WARNING: transcript is under 2000 characters, which is short for "
+                    "a 20-25 minute episode. You may want to retry."
                 )
 
-            # Step 3: Translate (if needed)
-            if needs_translation:
-                with BATCH_LOCK:
-                    video["step"] = "Translating"
-                translation = transcribe.translate_text(
-                    transcript,
-                    source_language=source_lang,
-                    target_language=target_lang,
-                    log_callback=log,
-                )
-                translation_filename = f"video{idx}_{safe_slug(target_lang)}_translation.txt"
-                write_output_file(translation, translation_filename)
-                with BATCH_LOCK:
-                    video["translation_file"] = translation_filename
-                log(f"Translation saved: {translation_filename} ({len(translation)} chars)")
-            else:
-                log("Source and target language are the same; skipping translation.")
+            # NOTE: Translation step intentionally removed. translate_text() in
+            # transcribe.py is preserved as dead code for future re-enablement.
 
             # Success: clean up the local video file.
             try:
@@ -225,10 +313,18 @@ def run_batch(batch_id: str):
             BATCH["status"] = "done"
             BATCH["finished_at"] = datetime.now().isoformat(timespec="seconds")
 
+    # Auto-cleanup: any download files still sitting around that belong to
+    # DONE videos (not failed ones that might be retried) should go.
+    # The per-video success path already deletes its own file, so this is
+    # a belt-and-braces sweep for anything the success path missed (e.g. crash).
+    try:
+        cleanup_downloads(force=False)
+    except Exception:
+        pass  # Cleanup is best-effort; never let it fail the batch.
 
-def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: str, batch_id: str):
+
+def retry_single_video(video: dict, source_lang: str, prompt: str, batch_id: str):
     """Retry a single failed video. Runs in its own thread."""
-    needs_translation = source_lang != target_lang
     idx = video["index"]
 
     def log(msg: str, v=video):
@@ -247,7 +343,7 @@ def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: 
         video["finished_at"] = None
         video["elapsed_seconds"] = 0
         video["transcript_file"] = None
-        video["translation_file"] = None
+        video["translation_file"] = None  # always None now; preserved for compatibility
 
     start_time = time.time()
     local_video_path: Path | None = None
@@ -269,26 +365,17 @@ def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: 
         transcript = transcribe.transcribe_video(
             str(local_video_path),
             source_language=source_lang,
+            video_title=video.get("title", ""),
             prompt=prompt,
             log_callback=log,
         )
-        transcript_filename = f"video{idx}_{safe_slug(source_lang)}_transcript.txt"
+        transcript_filename = f"{filename_prefix(video)}_{safe_slug(source_lang)}_transcript.csv"
         write_output_file(transcript, transcript_filename)
         with BATCH_LOCK:
             video["transcript_file"] = transcript_filename
         log(f"Transcript saved: {transcript_filename} ({len(transcript)} chars)")
 
-        if needs_translation:
-            with BATCH_LOCK:
-                video["step"] = "Translating"
-            translation = transcribe.translate_text(
-                transcript, source_lang, target_lang, log_callback=log,
-            )
-            translation_filename = f"video{idx}_{safe_slug(target_lang)}_translation.txt"
-            write_output_file(translation, translation_filename)
-            with BATCH_LOCK:
-                video["translation_file"] = translation_filename
-            log(f"Translation saved: {translation_filename} ({len(translation)} chars)")
+        # NOTE: Translation step intentionally removed.
 
         try:
             if local_video_path and local_video_path.exists():
@@ -325,8 +412,9 @@ def index():
         "index.html",
         languages=SUPPORTED_LANGUAGES,
         max_links=MAX_LINKS_PER_BATCH,
-        default_prompt=transcribe.DEFAULT_TRANSCRIPTION_PROMPT,
         batch=batch_snapshot,
+        downloads_info=get_downloads_info(),
+        cleanup_msg=request.args.get("cleanup_msg"),
     )
 
 
@@ -339,36 +427,40 @@ def start():
         if BATCH and BATCH["status"] == "running":
             return "A batch is already running. Wait for it to finish.", 400
 
-    links_raw = request.form.get("links", "").strip()
+    links_raw = request.form.get("links", "").strip()  # legacy, no longer used; kept for safety
     source_lang = request.form.get("source_language", "").strip()
-    target_lang = request.form.get("target_language", "").strip()
-    prompt_raw = request.form.get("prompt", "")
 
     if source_lang not in SUPPORTED_LANGUAGES:
         return f"Invalid source language: {source_lang}", 400
-    if target_lang not in SUPPORTED_LANGUAGES:
-        return f"Invalid target language: {target_lang}", 400
 
-    # Fall back to the default if the user blanked out the prompt box.
-    prompt = prompt_raw.strip() or transcribe.DEFAULT_TRANSCRIPTION_PROMPT
+    # Prompt is now hardcoded in transcribe.DEFAULT_TRANSCRIPTION_PROMPT.
+    # No longer accepted from the form.
+    prompt = transcribe.DEFAULT_TRANSCRIPTION_PROMPT
 
-    links = [ln.strip() for ln in links_raw.splitlines() if ln.strip()]
-    if not links:
+    # Read up to MAX_LINKS_PER_BATCH separate link fields and matching title fields.
+    # Empty rows are skipped so the user can submit 1, 2, or 3 videos.
+    submissions = []  # list of (link, title) pairs in submission order
+    for slot in range(1, MAX_LINKS_PER_BATCH + 1):
+        link = request.form.get(f"link_{slot}", "").strip()
+        title = request.form.get(f"title_{slot}", "").strip()
+        if not link and not title:
+            continue  # empty row, skip
+        if not link:
+            return f"Row {slot} has a title but no Google Drive link.", 400
+        if not extract_drive_id(link):
+            return f"Could not parse a Google Drive file ID from row {slot}: {link}", 400
+        submissions.append((link, title))
+
+    if not submissions:
         return "Please paste at least one Google Drive link.", 400
-    if len(links) > MAX_LINKS_PER_BATCH:
-        return f"Please paste at most {MAX_LINKS_PER_BATCH} links.", 400
-
-    # Validate each link parses.
-    for ln in links:
-        if not extract_drive_id(ln):
-            return f"Could not parse a Google Drive file ID from: {ln}", 400
 
     batch_id = uuid.uuid4().hex[:8]
     videos = []
-    for i, ln in enumerate(links, start=1):
+    for i, (link, title) in enumerate(submissions, start=1):
         videos.append({
             "index": i,
-            "link": ln,
+            "link": link,
+            "title": title,  # may be empty string; filename code falls back to videoN
             "status": "queued",
             "step": "Queued",
             "elapsed_seconds": 0,
@@ -385,7 +477,6 @@ def start():
             "id": batch_id,
             "status": "running",
             "source_language": source_lang,
-            "target_language": target_lang,
             "prompt": prompt,
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "finished_at": None,
@@ -424,13 +515,12 @@ def retry(video_index):
         if video["status"] != "failed":
             return "Only failed videos can be retried.", 400
         source_lang = BATCH["source_language"]
-        target_lang = BATCH["target_language"]
         prompt = BATCH["prompt"]
         batch_id = BATCH["id"]
 
     worker = threading.Thread(
         target=retry_single_video,
-        args=(video, source_lang, target_lang, prompt, batch_id),
+        args=(video, source_lang, prompt, batch_id),
         daemon=True,
     )
     worker.start()
@@ -448,6 +538,50 @@ def new_batch():
     return redirect(url_for("index"))
 
 
+@app.route("/cleanup", methods=["POST"])
+def cleanup():
+    """
+    Delete files in the downloads/ folder.
+
+    Form param 'force' = '1' deletes everything (including files reserved for
+    retries of currently-failed videos). Otherwise we do a safe cleanup that
+    preserves retry capability.
+
+    Blocked while a batch is actively running (we could be yanking a file
+    that's mid-transcription).
+    """
+    with BATCH_LOCK:
+        if BATCH and BATCH["status"] == "running":
+            return "Cannot clean up while a batch is running.", 400
+
+    force = request.form.get("force") == "1"
+    result = cleanup_downloads(force=force)
+
+    # Build a short status message for the UI.
+    if result["deleted_count"] == 0 and result["skipped_count"] == 0:
+        msg = "Downloads folder was already empty."
+    else:
+        parts = [
+            f"Deleted {result['deleted_count']} file(s), freed {result['deleted_mb']} MB."
+        ]
+        if result["skipped_count"] > 0:
+            parts.append(
+                f"Skipped {result['skipped_count']} file(s) reserved for retry "
+                f"(use Force clean to remove)."
+            )
+        if result["errors"]:
+            parts.append(f"Errors: {'; '.join(result['errors'][:3])}")
+        msg = " ".join(parts)
+
+    return redirect(url_for("index", cleanup_msg=msg))
+
+
+@app.route("/downloads_info")
+def downloads_info():
+    """Return current downloads/ folder size as JSON."""
+    return jsonify(get_downloads_info())
+
+
 @app.route("/outputs/<path:filename>")
 def download_output(filename):
     # Basic safety: only allow plain filenames, no traversal.
@@ -459,7 +593,35 @@ def download_output(filename):
 # -------------------------------------------------------------------
 # Entry point
 # -------------------------------------------------------------------
+def _run_cli_cleanup():
+    """Handle `python app.py --clean-downloads` for use from the terminal."""
+    info_before = get_downloads_info()
+    print(
+        f"Downloads folder contains {info_before['file_count']} file(s), "
+        f"{info_before['total_mb']} MB total."
+    )
+    if info_before["file_count"] == 0:
+        print("Nothing to clean up.")
+        return 0
+    # From the CLI, we force-delete everything. The user is explicitly asking.
+    result = cleanup_downloads(force=True)
+    print(
+        f"Deleted {result['deleted_count']} file(s), "
+        f"freed {result['deleted_mb']} MB."
+    )
+    if result["errors"]:
+        print("Errors:")
+        for err in result["errors"]:
+            print(f"  - {err}")
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
+    # CLI mode: python app.py --clean-downloads
+    if len(sys.argv) > 1 and sys.argv[1] == "--clean-downloads":
+        sys.exit(_run_cli_cleanup())
+
     if not os.environ.get("GEMINI_API_KEY"):
         print("WARNING: GEMINI_API_KEY is not set. Create a .env file with:")
         print("    GEMINI_API_KEY=your-key-here")

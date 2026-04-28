@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video Transcriber</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+    color: #222;
+    line-height: 1.5;
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  p.subtitle { color: #666; margin-top: 0; }
+  form { border: 1px solid #ddd; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
+  label { display: block; font-weight: 600; margin: 10px 0 4px; }
+  textarea, select, input[type=submit], button {
+    font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { width: 100%; box-sizing: border-box; padding: 8px; }
+  select { padding: 6px; }
+  .row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 200px; }
+  button, input[type=submit] {
+    background: #2a6; color: white; border: 0; padding: 8px 16px;
+    border-radius: 4px; cursor: pointer;
+  }
+  button.secondary { background: #888; }
+  button.retry { background: #c63; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+  th, td { border-bottom: 1px solid #eee; padding: 8px 6px; text-align: left; vertical-align: top; }
+  th { background: #f6f6f6; font-size: 13px; }
+  .status-queued { color: #888; }
+  .status-running { color: #26a; font-weight: 600; }
+  .status-done { color: #2a6; font-weight: 600; }
+  .status-failed { color: #c33; font-weight: 600; }
+  .log {
+    background: #fafafa; border: 1px solid #eee; padding: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+    margin-top: 4px;
+  }
+  .link-cell { font-size: 12px; color: #555; word-break: break-all; max-width: 260px; }
+  .error-cell { color: #c33; font-size: 13px; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; font-size: 12px; color: #555; }
+  .batch-meta { color: #666; font-size: 13px; margin-bottom: 12px; }
+  .hint { font-size: 12px; color: #666; margin-top: 4px; }
+  .used-prompt {
+    background: #fafafa; border: 1px solid #eee; padding: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; white-space: pre-wrap; margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Video Transcriber</h1>
+<p class="subtitle">Paste up to {{ max_links }} public Google Drive video links. The tool will transcribe each video and optionally translate the transcript. Do not close this terminal while a batch is running.</p>
+
+{% if not batch or batch.status == "done" %}
+  {# Idle state: show the form #}
+  <form method="post" action="/start">
+    <label for="links">Google Drive links (one per line, up to {{ max_links }})</label>
+    <textarea id="links" name="links" rows="4" placeholder="https://drive.google.com/file/d/.../view?usp=sharing"></textarea>
+
+    <label for="prompt">Transcription prompt (sent to Gemini)</label>
+    <textarea id="prompt" name="prompt" rows="6">{{ default_prompt }}</textarea>
+    <div class="hint">
+      This prompt is sent to Gemini along with each video. Edit it to change how the
+      transcription is produced. You can include the placeholder <code>{source_language}</code> anywhere
+      in the prompt and it will be replaced with the source language you pick below.
+      Leave this box empty to use the default prompt.
+      <button type="button" class="secondary small" onclick="resetPrompt()" style="margin-left:8px;">Reset to default</button>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="source_language">Video language (source)</label>
+        <select id="source_language" name="source_language">
+          {% for lang in languages %}
+            <option value="{{ lang }}"{% if lang == "Hindi" %} selected{% endif %}>{{ lang }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="target_language">Translate to (target)</label>
+        <select id="target_language" name="target_language">
+          {% for lang in languages %}
+            <option value="{{ lang }}"{% if lang == "English" %} selected{% endif %}>{{ lang }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">
+          If source and target are the same, translation is skipped.
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 16px;">
+      <input type="submit" value="Start batch">
+    </div>
+  </form>
+
+  <script>
+    // Store the default prompt so the user can reset to it if they modify or clear it.
+    const DEFAULT_PROMPT = {{ default_prompt|tojson }};
+    function resetPrompt() {
+      document.getElementById('prompt').value = DEFAULT_PROMPT;
+    }
+  </script>
+{% endif %}
+
+{% if batch %}
+  <h2 style="font-size:18px;">Batch {{ batch.id }} &middot; <span class="status-{{ batch.status }}">{{ batch.status|capitalize }}</span></h2>
+  <div class="batch-meta">
+    Source: <strong>{{ batch.source_language }}</strong> &nbsp;|&nbsp;
+    Target: <strong>{{ batch.target_language }}</strong> &nbsp;|&nbsp;
+    Started: {{ batch.started_at }}
+    {% if batch.finished_at %} &nbsp;|&nbsp; Finished: {{ batch.finished_at }}{% endif %}
+  </div>
+  <details>
+    <summary>Show prompt used for this batch</summary>
+    <div class="used-prompt">{{ batch.prompt }}</div>
+  </details>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Link</th>
+        <th>Step</th>
+        <th>Elapsed</th>
+        <th>Outputs</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in batch.videos %}
+      <tr>
+        <td>{{ v.index }}</td>
+        <td class="link-cell">{{ v.link }}</td>
+        <td>
+          <span class="status-{{ v.status }}">{{ v.step }}</span>
+          {% if v.status == "failed" and v.error %}
+            <div class="error-cell">{{ v.error }}</div>
+          {% endif %}
+          {% if v.log %}
+            <details>
+              <summary>Show log ({{ v.log|length }} lines)</summary>
+              <div class="log">{% for line in v.log %}{{ line }}
+{% endfor %}</div>
+            </details>
+          {% endif %}
+        </td>
+        <td>
+          {% if v.elapsed_seconds %}
+            {{ (v.elapsed_seconds // 60) }}m {{ (v.elapsed_seconds % 60) }}s
+          {% else %}
+            &mdash;
+          {% endif %}
+        </td>
+        <td>
+          {% if v.transcript_file %}
+            <div><a href="/outputs/{{ v.transcript_file }}">Transcript</a></div>
+          {% endif %}
+          {% if v.translation_file %}
+            <div><a href="/outputs/{{ v.translation_file }}">Translation</a></div>
+          {% endif %}
+          {% if not v.transcript_file and not v.translation_file %}
+            &mdash;
+          {% endif %}
+        </td>
+        <td>
+          {% if v.status == "failed" and batch.status == "done" %}
+            <form method="post" action="/retry/{{ v.index }}" style="display:inline;">
+              <button class="retry" type="submit">Retry</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if batch.status == "done" %}
+    <form method="post" action="/new" style="display:inline;">
+      <button class="secondary" type="submit">Start a new batch</button>
+    </form>
+  {% else %}
+    <p class="subtitle">This page auto-refreshes every 5 seconds while the batch is running. You can safely close this tab; processing will continue on the server.</p>
+  {% endif %}
+{% endif %}
+
+{% if batch and batch.status == "running" %}
+<script>
+  // Auto-refresh the page every 5 seconds while running.
+  setTimeout(function() { window.location.reload(); }, 5000);
+</script>
+{% endif %}
+
+</body>
+</html>
