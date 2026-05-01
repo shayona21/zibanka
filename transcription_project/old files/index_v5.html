@@ -15,23 +15,20 @@
     background-color: #f7f7f7;
   }
   .page-header {
-    margin-bottom: 24px;
-  }
-  .logo-row {
     display: flex;
-    justify-content: flex-end;
-    margin-bottom: 8px;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+    margin-bottom: 4px;
   }
-  .logo-row img {
-    max-height: 54px;
-    max-width: 180px;
+  .page-header .titles { flex: 1; }
+  .page-header .logo img {
+    max-height: 60px;
+    max-width: 200px;
     height: auto;
     width: auto;
   }
-  .header-spacer {
-    height: 20px;
-  }
-  h1 { font-size: 32px; margin: 0 0 4px 0; }
+  h1 { font-size: 22px; margin: 0 0 4px 0; }
   p.subtitle { color: #666; margin-top: 0; }
   form { border: 1px solid #ddd; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
   label { display: block; font-weight: 600; margin: 10px 0 4px; }
@@ -124,45 +121,19 @@
   .link-headers .row-num { width: 18px; }
   .link-headers .title-h { flex: 0 0 220px; }
   .link-headers .link-h { flex: 1; }
-  .video-block {
-    border-top: 1px solid #e0e0e0;
-    padding-top: 12px;
-    margin-top: 12px;
-  }
-  .video-block.first { border-top: 0; padding-top: 0; margin-top: 0; }
-  .context-row {
-    margin-top: 6px;
-    margin-left: 28px;
-  }
-  .context-row label {
-    font-size: 12px;
-    font-weight: 600;
-    color: #555;
-    margin: 0 0 2px 0;
-  }
-  .context-row textarea {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 6px 8px;
-    font-family: inherit;
-    font-size: 13px;
-    border: 1px solid #ccc;
-    border-radius: 3px;
-    resize: vertical;
-  }
-  .context-row .hint { margin-top: 2px; }
 </style>
 </head>
 <body>
 
 <div class="page-header">
-  <div class="logo-row">
+  <div class="titles">
+    <h1>Video Transcriber</h1>
+    <p class="subtitle">Add up to {{ max_links }} public Google Drive video links. Each row takes one link and an optional title (used to name the output files). Do not close this terminal while a batch is running.</p>
+  </div>
+  <div class="logo">
     <img src="{{ url_for('static', filename='zibanka_logo.jpeg') }}" alt="Company logo">
   </div>
-  <h1>Video Transcriber</h1>
-  <p class="subtitle">Add up to {{ max_links }} public Google Drive video links. Each row takes one link, an optional title (used to name the output files), and an optional context box. Do not close this terminal while a batch is running.</p>
 </div>
-<div class="header-spacer"></div>
 
 {% if cleanup_msg %}
   <div class="flash">{{ cleanup_msg }}</div>
@@ -178,19 +149,13 @@
       <span class="link-h">Google Drive link</span>
     </div>
     {% for slot in range(1, max_links + 1) %}
-    <div class="video-block{% if slot == 1 %} first{% endif %}">
-      <div class="link-row">
-        <span class="row-num">{{ slot }}.</span>
-        <input class="title-input" type="text" name="title_{{ slot }}" placeholder="e.g. Q1 town hall" maxlength="80">
-        <input class="link-input" type="text" name="link_{{ slot }}" placeholder="https://drive.google.com/file/d/.../view?usp=sharing">
-      </div>
-      <div class="context-row">
-        <label for="context_{{ slot }}">Video context (optional)</label>
-        <textarea id="context_{{ slot }}" name="context_{{ slot }}" rows="2" maxlength="2000" placeholder="Add the TV series name, character names, plot summary, or any other context that would help Gemini transcribe more accurately."></textarea>
-      </div>
+    <div class="link-row">
+      <span class="row-num">{{ slot }}.</span>
+      <input class="title-input" type="text" name="title_{{ slot }}" placeholder="e.g. Q1 town hall" maxlength="80">
+      <input class="link-input" type="text" name="link_{{ slot }}" placeholder="https://drive.google.com/file/d/.../view?usp=sharing">
     </div>
     {% endfor %}
-    <div class="hint" style="margin-top:12px;">Leave a row blank to skip it. If you don't enter a title, the file will be named generically (video1, video2, video3).</div>
+    <div class="hint">Leave a row blank to skip it. If you don't enter a title, the file will be named generically (video1, video2, video3).</div>
 
     <div class="row">
       <div>
@@ -235,12 +200,6 @@
         <td class="link-cell">
           {% if v.title %}<div style="font-weight:600; color:#222; word-break:normal; margin-bottom:2px;">{{ v.title }}</div>{% endif %}
           {{ v.link }}
-          {% if v.context %}
-            <details style="margin-top:4px;">
-              <summary>Show context</summary>
-              <div class="used-prompt">{{ v.context }}</div>
-            </details>
-          {% endif %}
         </td>
         <td>
           <span class="status-{{ v.status }}">{{ v.step }}</span>
@@ -265,11 +224,7 @@
         <td>
           {% if v.transcript_file %}
             <div><a href="/outputs/{{ v.transcript_file }}">Transcript (CSV)</a></div>
-          {% endif %}
-          {% if v.transcript_xlsx_file %}
-            <div><a href="/outputs/{{ v.transcript_xlsx_file }}">Transcript (XLSX)</a></div>
-          {% endif %}
-          {% if not v.transcript_file and not v.transcript_xlsx_file %}
+          {% else %}
             &mdash;
           {% endif %}
         </td>

@@ -28,9 +28,11 @@ RETRY_BACKOFF_SECONDS = 10  # doubled each retry
 FILE_ACTIVE_TIMEOUT_SECONDS = 600
 FILE_POLL_INTERVAL_SECONDS = 5
 
-# Default transcription prompt. Two placeholders are substituted at call time:
-#   {source_language}     - e.g. "Hindi"
-#   {video_title_param}   - the user-provided title, or "untitled video" if blank
+# Default transcription prompt. Three placeholders are substituted at call time:
+#   {source_language}      - e.g. "Hindi"
+#   {video_title_param}    - the user-provided title, or "untitled video" if blank
+#   {video_context_param}  - the user-provided context (series, characters, plot),
+#                            or "(no additional context provided)" if blank
 #
 # The prompt asks Gemini for a pipe-delimited CSV so the output can be opened
 # in Google Sheets via "custom delimiter = pipe". The strict-format instruction
@@ -44,6 +46,7 @@ DEFAULT_TRANSCRIPTION_PROMPT = (
     "You have to write each sentence in a new line. "
     "Also write the timestamp when the sentence begins and when the sentence ends. "
     "Time stamp should be in the format hh:mm:ss:ff.\n"
+    "Here is some context about the TV episode. {video_context_param}\n"
     "Don't skip any dialogue. Transcribe the dialogue, even if there is no lip-movement on the screen. "
     "If you cannot identify the speaker, mention the speaker name as \"Unknown\". "
     "Even Don't shorten or summarize. Also mention time-stamp and speaker names if you can.\n"
@@ -60,10 +63,9 @@ DEFAULT_TRANSCRIPTION_PROMPT = (
     "2. End Timestamp\n"
     "3. Speaker name in Roman {source_language}\n"
     "4. Dialogue \u2013 {source_language} Script\n"
-    "5. [Speaker name in {source_language}]\n"
-    "6. Dialogue \u2013 Roman {source_language} Script\n"
+    "5. [Speaker name in {source_language}] Dialogue \u2013 Roman {source_language}\n"
     "These will be the headers: \"start_timestamp\", \"end_timestamp\", \"speaker_roman\", "
-    "\"dialogue_source\", \"speaker_source\", \"dialogue_roman\". "
+    "\"dialogue_source\", \"combined\". "
     "Output ONLY the pipe-delimited CSV. Use the pipe character | to separate columns. "
     "Do not wrap in markdown code blocks. Do not add explanations before or after. "
     "Do not include a separator row. The first row must be the header row exactly as specified above. "
@@ -149,16 +151,18 @@ def _with_retries(fn, description, log_callback=None):
     raise last_error if last_error else RuntimeError(f"{description} failed.")
 
 
-def _render_prompt(prompt: str, source_language: str, video_title: str) -> str:
+def _render_prompt(prompt: str, source_language: str, video_title: str, video_context: str) -> str:
     """
-    Substitute {source_language} and {video_title_param} in the prompt.
-    Either may be absent in custom prompts; we leave non-placeholders alone.
+    Substitute {source_language}, {video_title_param}, and {video_context_param}
+    in the prompt. Any placeholder absent in custom prompts is left alone.
     """
     rendered = prompt
     if "{source_language}" in rendered:
         rendered = rendered.replace("{source_language}", source_language)
     if "{video_title_param}" in rendered:
         rendered = rendered.replace("{video_title_param}", video_title)
+    if "{video_context_param}" in rendered:
+        rendered = rendered.replace("{video_context_param}", video_context)
     return rendered
 
 
@@ -206,8 +210,8 @@ def _clean_csv_output(text: str) -> str:
         cleaned.append(ln)
 
     # Fix rows with too many columns by joining trailing extras into the last
-    # column. Header row has 6 fields, so we expect 6 fields per row (5 pipes).
-    EXPECTED_FIELDS = 6
+    # column. Header row has 5 fields, so we expect 5 fields per row (4 pipes).
+    EXPECTED_FIELDS = 5
     fixed = []
     for ln in cleaned:
         if "|" not in ln:
@@ -232,6 +236,7 @@ def transcribe_video(
     video_path: str,
     source_language: str,
     video_title: str = "untitled video",
+    video_context: str = "",
     prompt: str | None = None,
     log_callback=None,
 ) -> str:
@@ -244,9 +249,12 @@ def transcribe_video(
         video_title: the user-provided title (raw, not slugged). Substituted
                      into the prompt's {video_title_param} placeholder.
                      Defaults to "untitled video" if blank.
+        video_context: optional user-provided context (TV series, characters,
+                       plot summary). Substituted into {video_context_param}.
+                       Defaults to "(no additional context provided)" if blank.
         prompt: optional custom prompt string. If omitted or blank, uses the default.
-                May include the placeholders {source_language} and {video_title_param}
-                which will be substituted.
+                May include the placeholders {source_language}, {video_title_param},
+                and {video_context_param} which will be substituted.
         log_callback: optional callable(str) for status updates
 
     Returns:
@@ -258,7 +266,10 @@ def transcribe_video(
     # Resolve the prompt: use the caller's if non-blank, else the default.
     effective_prompt = (prompt or "").strip() or DEFAULT_TRANSCRIPTION_PROMPT
     title_for_prompt = (video_title or "").strip() or "untitled video"
-    effective_prompt = _render_prompt(effective_prompt, source_language, title_for_prompt)
+    context_for_prompt = (video_context or "").strip() or "(no additional context provided)"
+    effective_prompt = _render_prompt(
+        effective_prompt, source_language, title_for_prompt, context_for_prompt
+    )
 
     if log_callback:
         log_callback(f"Uploading video to Gemini (mime={mime})...")

@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import gdown
+import openpyxl
 from flask import Flask, render_template, request, jsonify, send_from_directory, abort, redirect, url_for
 from dotenv import load_dotenv
 
@@ -55,8 +56,9 @@ app = Flask(__name__)
 #   prompt: str               # the (hardcoded) transcription prompt used for this batch
 #   started_at: iso timestamp
 #   videos: list of dicts, each with:
-#       index, link, title, status, step, elapsed_seconds, started_at, finished_at,
-#       error, transcript_file, translation_file (always None), log (list of strings)
+#       index, link, title, context, status, step, elapsed_seconds, started_at,
+#       finished_at, error, transcript_file, transcript_xlsx_file,
+#       translation_file (always None), log (list of strings)
 # NOTE: target_language was removed when translation was disabled. translation_file
 # is preserved on each video dict but always None.
 BATCH_LOCK = threading.Lock()
@@ -138,6 +140,56 @@ def write_output_file(content: str, filename: str) -> Path:
         path.write_text(content, encoding="utf-8-sig")
     else:
         path.write_text(content, encoding="utf-8")
+    return path
+
+
+def write_xlsx_from_csv(csv_text: str, filename: str) -> Path:
+    """
+    Convert pipe-delimited CSV text into a real .xlsx file.
+
+    Each row from the CSV becomes a row in the spreadsheet, with each pipe-
+    separated field placed in its own cell. All cells are stored as plain text
+    so Excel/Sheets do not auto-coerce timestamps like '01:23:45:12' into
+    dates or strip leading zeros from numbers in dialogue.
+
+    Column widths are auto-sized to fit the longest content per column,
+    capped at 80 characters wide so dialogue columns don't sprawl.
+
+    Defensive: rows with fewer or more fields than the header are written
+    as-is, never crashes the batch.
+    """
+    path = OUTPUTS_DIR / filename
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Transcript"
+
+    # Track max length per column for auto-sizing.
+    max_widths: dict[int, int] = {}
+
+    for row_text in csv_text.splitlines():
+        if not row_text.strip():
+            continue
+        fields = row_text.split("|")
+        # Append the row. Force every cell to be plain text by pre-setting
+        # number_format to '@' (Excel's text format).
+        sheet.append(fields)
+        current_row = sheet.max_row
+        for col_idx, field in enumerate(fields, start=1):
+            cell = sheet.cell(row=current_row, column=col_idx)
+            cell.number_format = "@"
+            # Track width
+            field_len = len(field)
+            if field_len > max_widths.get(col_idx, 0):
+                max_widths[col_idx] = field_len
+
+    # Apply auto-widths, capped at 80 chars wide. Add a small padding of 2.
+    for col_idx, width in max_widths.items():
+        capped = min(width + 2, 80)
+        column_letter = openpyxl.utils.get_column_letter(col_idx)
+        sheet.column_dimensions[column_letter].width = capped
+
+    workbook.save(path)
     return path
 
 
@@ -261,6 +313,7 @@ def run_batch(batch_id: str):
                 str(local_video_path),
                 source_language=source_lang,
                 video_title=video.get("title", ""),
+                video_context=video.get("context", ""),
                 prompt=prompt,
                 log_callback=log,
             )
@@ -269,6 +322,18 @@ def run_batch(batch_id: str):
             with BATCH_LOCK:
                 video["transcript_file"] = transcript_filename
             log(f"Transcript saved: {transcript_filename} ({len(transcript)} chars)")
+
+            # Also write an .xlsx version so users can open it directly in
+            # Google Sheets without specifying a delimiter.
+            try:
+                xlsx_filename = f"{filename_prefix(video)}_{safe_slug(source_lang)}_transcript.xlsx"
+                write_xlsx_from_csv(transcript, xlsx_filename)
+                with BATCH_LOCK:
+                    video["transcript_xlsx_file"] = xlsx_filename
+                log(f"XLSX saved: {xlsx_filename}")
+            except Exception as e:
+                # XLSX generation is a convenience; never fail the job over it.
+                log(f"Warning: could not generate XLSX: {e}")
 
             # Sanity check: flag suspiciously short transcripts. The CSV format
             # is much longer than the previous plain-text format, so the
@@ -343,6 +408,7 @@ def retry_single_video(video: dict, source_lang: str, prompt: str, batch_id: str
         video["finished_at"] = None
         video["elapsed_seconds"] = 0
         video["transcript_file"] = None
+        video["transcript_xlsx_file"] = None
         video["translation_file"] = None  # always None now; preserved for compatibility
 
     start_time = time.time()
@@ -366,6 +432,7 @@ def retry_single_video(video: dict, source_lang: str, prompt: str, batch_id: str
             str(local_video_path),
             source_language=source_lang,
             video_title=video.get("title", ""),
+            video_context=video.get("context", ""),
             prompt=prompt,
             log_callback=log,
         )
@@ -374,6 +441,15 @@ def retry_single_video(video: dict, source_lang: str, prompt: str, batch_id: str
         with BATCH_LOCK:
             video["transcript_file"] = transcript_filename
         log(f"Transcript saved: {transcript_filename} ({len(transcript)} chars)")
+
+        try:
+            xlsx_filename = f"{filename_prefix(video)}_{safe_slug(source_lang)}_transcript.xlsx"
+            write_xlsx_from_csv(transcript, xlsx_filename)
+            with BATCH_LOCK:
+                video["transcript_xlsx_file"] = xlsx_filename
+            log(f"XLSX saved: {xlsx_filename}")
+        except Exception as e:
+            log(f"Warning: could not generate XLSX: {e}")
 
         # NOTE: Translation step intentionally removed.
 
@@ -437,30 +513,35 @@ def start():
     # No longer accepted from the form.
     prompt = transcribe.DEFAULT_TRANSCRIPTION_PROMPT
 
-    # Read up to MAX_LINKS_PER_BATCH separate link fields and matching title fields.
-    # Empty rows are skipped so the user can submit 1, 2, or 3 videos.
-    submissions = []  # list of (link, title) pairs in submission order
+    # Read up to MAX_LINKS_PER_BATCH separate link fields and matching title
+    # and context fields. Empty rows are skipped so the user can submit 1, 2, or 3 videos.
+    submissions = []  # list of (link, title, context) tuples in submission order
     for slot in range(1, MAX_LINKS_PER_BATCH + 1):
         link = request.form.get(f"link_{slot}", "").strip()
         title = request.form.get(f"title_{slot}", "").strip()
-        if not link and not title:
+        context = request.form.get(f"context_{slot}", "").strip()
+        if not link and not title and not context:
             continue  # empty row, skip
         if not link:
-            return f"Row {slot} has a title but no Google Drive link.", 400
+            return f"Row {slot} has a title or context but no Google Drive link.", 400
         if not extract_drive_id(link):
             return f"Could not parse a Google Drive file ID from row {slot}: {link}", 400
-        submissions.append((link, title))
+        # Defensive cap on context length matches the textarea maxlength.
+        if len(context) > 2000:
+            return f"Row {slot} video context is too long ({len(context)} chars); max 2000.", 400
+        submissions.append((link, title, context))
 
     if not submissions:
         return "Please paste at least one Google Drive link.", 400
 
     batch_id = uuid.uuid4().hex[:8]
     videos = []
-    for i, (link, title) in enumerate(submissions, start=1):
+    for i, (link, title, context) in enumerate(submissions, start=1):
         videos.append({
             "index": i,
             "link": link,
             "title": title,  # may be empty string; filename code falls back to videoN
+            "context": context,  # may be empty string
             "status": "queued",
             "step": "Queued",
             "elapsed_seconds": 0,
@@ -468,6 +549,7 @@ def start():
             "finished_at": None,
             "error": None,
             "transcript_file": None,
+            "transcript_xlsx_file": None,
             "translation_file": None,
             "log": [],
         })

@@ -19,7 +19,7 @@ import gdown
 from flask import Flask, render_template, request, jsonify, send_from_directory, abort, redirect, url_for
 from dotenv import load_dotenv
 
-import transcribe
+import transcription_project.transcribe as transcribe
 
 
 # -------------------------------------------------------------------
