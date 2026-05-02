@@ -2,14 +2,13 @@
 Gemini API calls for video transcription.
 
 Public function:
-  - transcribe_video(video_path, source_language, video_title, video_context,
-                     target_language, prompt) -> str
-
-When target_language is empty/None, the standard 5-column transcription prompt
-is used. When target_language is provided, a 6-column variant is used that adds
-a translation column ("translated_text") in the same Gemini call.
+  - transcribe_video(video_path, source_language, video_title, prompt) -> str
 
 Retries transient errors up to 3 times with exponential backoff.
+
+NOTE: translate_text() below is currently UNUSED. It is preserved as dead code
+because translation will be re-introduced later (likely to translate only the
+final dialogue column of the new CSV transcript). Do not delete.
 """
 
 import os
@@ -29,8 +28,16 @@ RETRY_BACKOFF_SECONDS = 10  # doubled each retry
 FILE_ACTIVE_TIMEOUT_SECONDS = 600
 FILE_POLL_INTERVAL_SECONDS = 5
 
-# Default transcription prompt — variant A (no translation, 5 columns).
-# Three placeholders: {source_language}, {video_title_param}, {video_context_param}.
+# Default transcription prompt. Three placeholders are substituted at call time:
+#   {source_language}      - e.g. "Hindi"
+#   {video_title_param}    - the user-provided title, or "untitled video" if blank
+#   {video_context_param}  - the user-provided context (series, characters, plot),
+#                            or "(no additional context provided)" if blank
+#
+# The prompt asks Gemini for a pipe-delimited CSV so the output can be opened
+# in Google Sheets via "custom delimiter = pipe". The strict-format instruction
+# is intentionally placed at the very end of the prompt because Gemini tends
+# to honour the most recent instruction when there is any ambiguity.
 DEFAULT_TRANSCRIPTION_PROMPT = (
     "I am uploading a {source_language} video ({video_title_param}). "
     "Please transcribe all the dialogues of this episode verbatim in {source_language} Script "
@@ -38,16 +45,16 @@ DEFAULT_TRANSCRIPTION_PROMPT = (
     "Also write the same script in the Roman {source_language} after each sentence. "
     "You have to write each sentence in a new line. "
     "Also write the timestamp when the sentence begins and when the sentence ends. "
-    "The time stamp should be in the format hh:mm:ss:ff.\n"
+    "Time stamp should be in the format hh:mm:ss:ff.\n"
     "Here is some context about the TV episode. {video_context_param}\n"
     "Don't skip any dialogue. Transcribe the dialogue, even if there is no lip-movement on the screen. "
     "If you cannot identify the speaker, mention the speaker name as \"Unknown\". "
-    "Don't shorten or summarize. Also mention time-stamp and speaker names if you can.\n"
+    "Even Don't shorten or summarize. Also mention time-stamp and speaker names if you can.\n"
     "If a pipe character | appears in a dialogue, replace it with a forward slash / . "
     "Do not include stage directions, commentary, section headers, bullet points. "
     "Transcribe the full audio from start to finish.\n"
-    "The speaker name should be both in {source_language} and Roman {source_language}. "
-    "The speaker name in {source_language} should be put within square brackets [ ].\n"
+    "Speaker name should be both in {source_language} and Roman {source_language}. "
+    "Speaker name in {source_language} should be put within square brackets [ ].\n"
     "Time-stamp: For time-stamp, follow the video time, and not the time-code printed on the video. "
     "Also, video is in PAL format, that is 25 frames per second. "
     "The time-stamp should be in the format hh:mm:ss:ff.\n"
@@ -59,48 +66,6 @@ DEFAULT_TRANSCRIPTION_PROMPT = (
     "5. [Speaker name in {source_language}] Dialogue \u2013 Roman {source_language}\n"
     "These will be the headers: \"start_timestamp\", \"end_timestamp\", \"speaker_roman\", "
     "\"dialogue_source\", \"combined\". "
-    "Output ONLY the pipe-delimited CSV. Use the pipe character | to separate columns. "
-    "Do not wrap in markdown code blocks. Do not add explanations before or after. "
-    "Do not include a separator row. The first row must be the header row exactly as specified above. "
-    "Each subsequent row is one sentence."
-)
-
-# Default transcription prompt — variant B (with translation, 6 columns).
-# Four placeholders: {source_language}, {video_title_param}, {video_context_param},
-# {target_language}.
-DEFAULT_TRANSCRIPTION_WITH_TRANSLATION_PROMPT = (
-    "I am uploading a {source_language} video ({video_title_param}). "
-    "Please transcribe all the dialogues of this episode verbatim in {source_language} Script "
-    "from the attached file. Complete the full file. "
-    "Also write the same script in the Roman {source_language} after each sentence. "
-    "You have to write each sentence in a new line. "
-    "Also write the timestamp when the sentence begins and when the sentence ends. "
-    "The time stamp should be in the format hh:mm:ss:ff.\n"
-    "Here is some context about the TV episode. {video_context_param}\n"
-    "Don't skip any dialogue. Transcribe the dialogue, even if there is no lip-movement on the screen. "
-    "If you cannot identify the speaker, mention the speaker name as \"Unknown\". "
-    "Don't shorten or summarize. Also mention time-stamp and speaker names if you can.\n"
-    "If a pipe character | appears in a dialogue, replace it with a forward slash / . "
-    "Do not include stage directions, commentary, section headers, bullet points. "
-    "Transcribe the full audio from start to finish.\n"
-    "The speaker name should be both in {source_language} and Roman {source_language}. "
-    "The speaker name in {source_language} should be put within square brackets [ ].\n"
-    "Time-stamp: For time-stamp, follow the video time, and not the time-code printed on the video. "
-    "Also, video is in PAL format, that is 25 frames per second. "
-    "The time-stamp should be in the format hh:mm:ss:ff.\n"
-    "Then translate the dialogue (column 5, \"combined\") into {target_language}. "
-    "Please keep the translation natural and fluent. Also, keep the idioms, metaphor, and Indian context "
-    "in mind while translating. Each translation must be in the same row as the dialogue it translates. "
-    "If a pipe character | appears in the translation, replace it with a forward slash /.\n"
-    "The output should be in the tabular format, with the following column names and sequence:\n"
-    "1. Start Timestamp\n"
-    "2. End Timestamp\n"
-    "3. Speaker name in Roman {source_language}\n"
-    "4. Dialogue \u2013 {source_language} Script\n"
-    "5. [Speaker name in {source_language}] Dialogue \u2013 Roman {source_language}\n"
-    "6. {target_language} translation of the dialogue\n"
-    "These will be the headers: \"start_timestamp\", \"end_timestamp\", \"speaker_roman\", "
-    "\"dialogue_source\", \"combined\", \"translated_text\". "
     "Output ONLY the pipe-delimited CSV. Use the pipe character | to separate columns. "
     "Do not wrap in markdown code blocks. Do not add explanations before or after. "
     "Do not include a separator row. The first row must be the header row exactly as specified above. "
@@ -186,17 +151,10 @@ def _with_retries(fn, description, log_callback=None):
     raise last_error if last_error else RuntimeError(f"{description} failed.")
 
 
-def _render_prompt(
-    prompt: str,
-    source_language: str,
-    video_title: str,
-    video_context: str,
-    target_language: str = "",
-) -> str:
+def _render_prompt(prompt: str, source_language: str, video_title: str, video_context: str) -> str:
     """
-    Substitute {source_language}, {video_title_param}, {video_context_param},
-    and (when translation is enabled) {target_language} in the prompt.
-    Any placeholder absent in custom prompts is left alone.
+    Substitute {source_language}, {video_title_param}, and {video_context_param}
+    in the prompt. Any placeholder absent in custom prompts is left alone.
     """
     rendered = prompt
     if "{source_language}" in rendered:
@@ -205,25 +163,20 @@ def _render_prompt(
         rendered = rendered.replace("{video_title_param}", video_title)
     if "{video_context_param}" in rendered:
         rendered = rendered.replace("{video_context_param}", video_context)
-    if "{target_language}" in rendered:
-        rendered = rendered.replace("{target_language}", target_language)
     return rendered
 
 
-def _clean_csv_output(text: str, expected_fields: int = 5) -> str:
+def _clean_csv_output(text: str) -> str:
     """
     Defensive post-processing for Gemini's CSV output.
 
     Gemini sometimes wraps responses in markdown code fences, adds preamble
     like "Here is the transcript:", or includes a markdown separator row.
     We strip these out best-effort. We also fix pipe collisions inside fields:
-    for any row that has more than `expected_fields` pipe-separated columns,
-    the extra pipes must have come from inside a dialogue, so we collapse the
-    trailing columns back into the last one (preserving content over
-    structure is the right default; we replace stray pipes with '/').
-
-    `expected_fields` is 5 for transcription-only, 6 for transcription +
-    translation.
+    for any row that has more than 6 pipe-separated columns, the extra pipes
+    must have come from inside a dialogue, so we collapse the trailing columns
+    back into the last one (preserving content over structure is the right
+    default; alternatively, we replace stray pipes with '/').
 
     Returns the cleaned CSV text. Always preserves a trailing newline.
     """
@@ -257,18 +210,19 @@ def _clean_csv_output(text: str, expected_fields: int = 5) -> str:
         cleaned.append(ln)
 
     # Fix rows with too many columns by joining trailing extras into the last
-    # column.
+    # column. Header row has 5 fields, so we expect 5 fields per row (4 pipes).
+    EXPECTED_FIELDS = 5
     fixed = []
     for ln in cleaned:
         if "|" not in ln:
             fixed.append(ln)
             continue
         parts = ln.split("|")
-        if len(parts) > expected_fields:
+        if len(parts) > EXPECTED_FIELDS:
             # Merge the surplus into the last column, replacing the merged
             # pipes with '/' so the row is still valid pipe-delimited CSV.
-            head = parts[:expected_fields - 1]
-            tail = "/".join(parts[expected_fields - 1:])
+            head = parts[:EXPECTED_FIELDS - 1]
+            tail = "/".join(parts[EXPECTED_FIELDS - 1:])
             parts = head + [tail]
         fixed.append("|".join(parts))
 
@@ -283,7 +237,6 @@ def transcribe_video(
     source_language: str,
     video_title: str = "untitled video",
     video_context: str = "",
-    target_language: str = "",
     prompt: str | None = None,
     log_callback=None,
 ) -> str:
@@ -299,40 +252,24 @@ def transcribe_video(
         video_context: optional user-provided context (TV series, characters,
                        plot summary). Substituted into {video_context_param}.
                        Defaults to "(no additional context provided)" if blank.
-        target_language: when non-empty, switches to the 6-column variant that
-                         adds a translated_text column. Substituted into
-                         {target_language}.
-        prompt: optional custom prompt string. If omitted or blank, uses the
-                appropriate default (with or without translation).
+        prompt: optional custom prompt string. If omitted or blank, uses the default.
+                May include the placeholders {source_language}, {video_title_param},
+                and {video_context_param} which will be substituted.
         log_callback: optional callable(str) for status updates
 
     Returns:
         The transcribed text as pipe-delimited CSV (post-processed and cleaned).
-        5 columns when target_language is empty, 6 when it's provided.
     """
     client = _get_client()
     mime = _guess_mime_type(video_path)
 
-    target = (target_language or "").strip()
-    translation_on = bool(target)
-
-    # Resolve the prompt: use the caller's if non-blank, else pick the right
-    # default based on whether translation is requested.
-    if prompt and prompt.strip():
-        effective_prompt = prompt.strip()
-    elif translation_on:
-        effective_prompt = DEFAULT_TRANSCRIPTION_WITH_TRANSLATION_PROMPT
-    else:
-        effective_prompt = DEFAULT_TRANSCRIPTION_PROMPT
-
+    # Resolve the prompt: use the caller's if non-blank, else the default.
+    effective_prompt = (prompt or "").strip() or DEFAULT_TRANSCRIPTION_PROMPT
     title_for_prompt = (video_title or "").strip() or "untitled video"
     context_for_prompt = (video_context or "").strip() or "(no additional context provided)"
     effective_prompt = _render_prompt(
-        effective_prompt, source_language, title_for_prompt, context_for_prompt, target,
+        effective_prompt, source_language, title_for_prompt, context_for_prompt
     )
-
-    # CSV column count drives the cleanup pass.
-    expected_fields = 6 if translation_on else 5
 
     if log_callback:
         log_callback(f"Uploading video to Gemini (mime={mime})...")
@@ -352,10 +289,7 @@ def transcribe_video(
         uploaded = _wait_until_active(client, uploaded, log_callback)
 
         if log_callback:
-            if translation_on:
-                log_callback(f"Transcribing and translating to {target} (this can take several minutes)...")
-            else:
-                log_callback("Transcribing (this can take several minutes)...")
+            log_callback("Transcribing (this can take several minutes)...")
 
         def _generate():
             return client.models.generate_content(
@@ -368,7 +302,7 @@ def transcribe_video(
         if not text:
             raise RuntimeError("Gemini returned an empty transcript.")
         # Post-process to strip code fences, separator rows, and over-pipe rows.
-        text = _clean_csv_output(text, expected_fields=expected_fields)
+        text = _clean_csv_output(text)
         return text
 
     finally:
@@ -380,3 +314,46 @@ def transcribe_video(
         except Exception as e:
             if log_callback:
                 log_callback(f"Warning: could not delete Gemini file {uploaded.name}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# DEAD CODE BELOW: translate_text() is currently unused. The UI no longer
+# offers translation, and run_batch / retry_single_video do not call this.
+# Preserved for an upcoming change that will translate only the dialogue
+# columns of the new CSV transcript. Do not delete.
+# TODO: when translation is re-enabled, this function will likely need to
+# operate per-row or per-column rather than on the whole transcript blob.
+# ---------------------------------------------------------------------------
+def translate_text(text: str, source_language: str, target_language: str, log_callback=None) -> str:
+    """
+    Translate a block of text from source_language to target_language using Gemini.
+    """
+    if source_language.strip().lower() == target_language.strip().lower():
+        # Caller should have checked this, but be defensive.
+        return text
+
+    client = _get_client()
+
+    prompt = (
+        f"Translate the following {source_language} text into {target_language}. "
+        f"Output ONLY the translation, as flowing natural prose. "
+        f"Do not include the original text, headers, notes, commentary, or formatting. "
+        f"Preserve meaning faithfully.\n\n"
+        f"--- TEXT TO TRANSLATE ---\n"
+        f"{text}"
+    )
+
+    if log_callback:
+        log_callback(f"Translating transcript to {target_language}...")
+
+    def _generate():
+        return client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[prompt],
+        )
+
+    response = _with_retries(_generate, "Translation", log_callback)
+    translated = (response.text or "").strip()
+    if not translated:
+        raise RuntimeError("Gemini returned an empty translation.")
+    return translated

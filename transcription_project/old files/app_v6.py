@@ -53,15 +53,14 @@ app = Flask(__name__)
 #   id: str
 #   status: "running" | "done"
 #   source_language: str
-#   target_language: str      # "" when translation is off, language name when on
-#   prompt: str               # caller-provided prompt override; usually empty
-#                             # so the appropriate default variant is picked
+#   prompt: str               # the (hardcoded) transcription prompt used for this batch
 #   started_at: iso timestamp
 #   videos: list of dicts, each with:
 #       index, link, title, context, status, step, elapsed_seconds, started_at,
 #       finished_at, error, transcript_file, transcript_xlsx_file,
-#       translation_file (always None; translation is now an extra column,
-#       not a separate file), log (list of strings)
+#       translation_file (always None), log (list of strings)
+# NOTE: target_language was removed when translation was disabled. translation_file
+# is preserved on each video dict but always None.
 BATCH_LOCK = threading.Lock()
 BATCH = None  # type: dict | None
 
@@ -279,7 +278,6 @@ def run_batch(batch_id: str):
             return
         videos = BATCH["videos"]
         source_lang = BATCH["source_language"]
-        target_lang = BATCH.get("target_language", "")
         prompt = BATCH["prompt"]
 
     for video in videos:
@@ -316,7 +314,6 @@ def run_batch(batch_id: str):
                 source_language=source_lang,
                 video_title=video.get("title", ""),
                 video_context=video.get("context", ""),
-                target_language=target_lang,
                 prompt=prompt,
                 log_callback=log,
             )
@@ -391,7 +388,7 @@ def run_batch(batch_id: str):
         pass  # Cleanup is best-effort; never let it fail the batch.
 
 
-def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: str, batch_id: str):
+def retry_single_video(video: dict, source_lang: str, prompt: str, batch_id: str):
     """Retry a single failed video. Runs in its own thread."""
     idx = video["index"]
 
@@ -436,7 +433,6 @@ def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: 
             source_language=source_lang,
             video_title=video.get("title", ""),
             video_context=video.get("context", ""),
-            target_language=target_lang,
             prompt=prompt,
             log_callback=log,
         )
@@ -509,29 +505,13 @@ def start():
 
     links_raw = request.form.get("links", "").strip()  # legacy, no longer used; kept for safety
     source_lang = request.form.get("source_language", "").strip()
-    translate_flag = request.form.get("translate") == "1"
-    target_lang = request.form.get("target_language", "").strip()
 
     if source_lang not in SUPPORTED_LANGUAGES:
         return f"Invalid source language: {source_lang}", 400
 
-    if translate_flag:
-        if target_lang not in SUPPORTED_LANGUAGES:
-            return f"Translation is enabled but target language is invalid: {target_lang}", 400
-        if target_lang == source_lang:
-            return (
-                f"Translation is enabled but source and target language are both '{source_lang}'. "
-                f"Pick a different target language or untick the Translate checkbox.",
-                400,
-            )
-    else:
-        # When translation is off, ignore the dropdown value entirely.
-        target_lang = ""
-
     # Prompt is now hardcoded in transcribe.DEFAULT_TRANSCRIPTION_PROMPT.
-    # No longer accepted from the form. The translation variant is selected
-    # downstream based on whether target_lang is non-empty.
-    prompt = ""
+    # No longer accepted from the form.
+    prompt = transcribe.DEFAULT_TRANSCRIPTION_PROMPT
 
     # Read up to MAX_LINKS_PER_BATCH separate link fields and matching title
     # and context fields. Empty rows are skipped so the user can submit 1, 2, or 3 videos.
@@ -579,7 +559,6 @@ def start():
             "id": batch_id,
             "status": "running",
             "source_language": source_lang,
-            "target_language": target_lang,  # empty string when translation is off
             "prompt": prompt,
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "finished_at": None,
@@ -618,13 +597,12 @@ def retry(video_index):
         if video["status"] != "failed":
             return "Only failed videos can be retried.", 400
         source_lang = BATCH["source_language"]
-        target_lang = BATCH.get("target_language", "")
         prompt = BATCH["prompt"]
         batch_id = BATCH["id"]
 
     worker = threading.Thread(
         target=retry_single_video,
-        args=(video, source_lang, target_lang, prompt, batch_id),
+        args=(video, source_lang, prompt, batch_id),
         daemon=True,
     )
     worker.start()

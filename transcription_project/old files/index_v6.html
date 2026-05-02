@@ -201,30 +201,7 @@
           {% endfor %}
         </select>
       </div>
-      <div>
-        <label for="target_language">Translation</label>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
-            <input type="checkbox" id="translate" name="translate" value="1" onchange="toggleTargetLanguage()">
-            Translate?
-          </label>
-          <select id="target_language" name="target_language" disabled>
-            {% for lang in languages %}
-              <option value="{{ lang }}"{% if lang == "English" %} selected{% endif %}>{{ lang }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="hint">When ticked, adds a translated_text column to the CSV/XLSX. Source and target must differ.</div>
-      </div>
     </div>
-
-    <script>
-      function toggleTargetLanguage() {
-        var cb = document.getElementById('translate');
-        var sel = document.getElementById('target_language');
-        sel.disabled = !cb.checked;
-      }
-    </script>
 
     <div style="margin-top: 16px;">
       <input type="submit" value="Start batch">
@@ -236,7 +213,6 @@
   <h2 style="font-size:18px;">Batch {{ batch.id }} &middot; <span class="status-{{ batch.status }}">{{ batch.status|capitalize }}</span></h2>
   <div class="batch-meta">
     Source language: <strong>{{ batch.source_language }}</strong> &nbsp;|&nbsp;
-    Translation: <strong>{% if batch.target_language %}{{ batch.target_language }}{% else %}off{% endif %}</strong> &nbsp;|&nbsp;
     Started: {{ batch.started_at }}
     {% if batch.finished_at %} &nbsp;|&nbsp; Finished: {{ batch.finished_at }}{% endif %}
   </div>
