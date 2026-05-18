@@ -3,11 +3,16 @@ Gemini API calls for video transcription.
 
 Public function:
   - transcribe_video(video_path, source_language, video_title, video_context,
-                     target_language, prompt) -> str
+                     target_language, start_time, end_time, prompt) -> str
 
 When target_language is empty/None, the standard 5-column transcription prompt
 is used. When target_language is provided, a 6-column variant is used that adds
 a translation column ("translated_text") in the same Gemini call.
+
+When start_time and/or end_time are provided (as mm:ss or hh:mm:ss strings),
+the prompt includes a segment-only instruction asking Gemini to transcribe just
+that part of the video using the original video's timestamps. When both are
+empty, the prompt is identical to the full-file version.
 
 Retries transient errors up to 3 times with exponential backoff.
 """
@@ -40,6 +45,7 @@ DEFAULT_TRANSCRIPTION_PROMPT = (
     "Also write the timestamp when the sentence begins and when the sentence ends. "
     "The time stamp should be in the format hh:mm:ss:ff.\n"
     "Here is some context about the TV episode. {video_context_param}\n"
+    "{segment_instruction}"
     "Don't skip any dialogue. Transcribe the dialogue, even if there is no lip-movement on the screen. "
     "If you cannot identify the speaker, mention the speaker name as \"Unknown\". "
     "Don't shorten or summarize. Also mention time-stamp and speaker names if you can.\n"
@@ -67,7 +73,8 @@ DEFAULT_TRANSCRIPTION_PROMPT = (
 
 # Default transcription prompt — variant B (with translation, 6 columns).
 # Four placeholders: {source_language}, {video_title_param}, {video_context_param},
-# {target_language}.
+# {target_language}. Plus {segment_instruction} which is substituted with either
+# an empty string (full file) or an explicit time-range instruction.
 DEFAULT_TRANSCRIPTION_WITH_TRANSLATION_PROMPT = (
     "I am uploading a {source_language} video ({video_title_param}). "
     "Please transcribe all the dialogues of this episode verbatim in {source_language} Script "
@@ -77,6 +84,7 @@ DEFAULT_TRANSCRIPTION_WITH_TRANSLATION_PROMPT = (
     "Also write the timestamp when the sentence begins and when the sentence ends. "
     "The time stamp should be in the format hh:mm:ss:ff.\n"
     "Here is some context about the TV episode. {video_context_param}\n"
+    "{segment_instruction}"
     "Don't skip any dialogue. Transcribe the dialogue, even if there is no lip-movement on the screen. "
     "If you cannot identify the speaker, mention the speaker name as \"Unknown\". "
     "Don't shorten or summarize. Also mention time-stamp and speaker names if you can.\n"
@@ -186,17 +194,44 @@ def _with_retries(fn, description, log_callback=None):
     raise last_error if last_error else RuntimeError(f"{description} failed.")
 
 
+def _build_segment_instruction(start_time: str, end_time: str) -> str:
+    """
+    Build the segment-only transcription instruction text from start/end times
+    (mm:ss or hh:mm:ss strings). Returns an empty string if both are blank,
+    meaning Gemini should transcribe the full video.
+
+    The instruction always ends with a newline so it can be inserted into the
+    prompt cleanly. When empty, the prompt reads naturally without it.
+    """
+    start = (start_time or "").strip()
+    end = (end_time or "").strip()
+    if not start and not end:
+        return ""
+    if start and end:
+        body = f"from {start} to {end} in the video"
+    elif start:
+        body = f"from {start} to the end of the video"
+    else:
+        body = f"from the beginning of the video to {end}"
+    return (
+        f"Only transcribe the segment {body}. "
+        f"Use the original video's timestamps (do not reset to zero at the segment start). "
+        f"Do not include any dialogue outside this range.\n"
+    )
+
+
 def _render_prompt(
     prompt: str,
     source_language: str,
     video_title: str,
     video_context: str,
     target_language: str = "",
+    segment_instruction: str = "",
 ) -> str:
     """
     Substitute {source_language}, {video_title_param}, {video_context_param},
-    and (when translation is enabled) {target_language} in the prompt.
-    Any placeholder absent in custom prompts is left alone.
+    {target_language} (when translation is enabled), and {segment_instruction}
+    in the prompt. Any placeholder absent in custom prompts is left alone.
     """
     rendered = prompt
     if "{source_language}" in rendered:
@@ -207,6 +242,8 @@ def _render_prompt(
         rendered = rendered.replace("{video_context_param}", video_context)
     if "{target_language}" in rendered:
         rendered = rendered.replace("{target_language}", target_language)
+    if "{segment_instruction}" in rendered:
+        rendered = rendered.replace("{segment_instruction}", segment_instruction)
     return rendered
 
 
@@ -284,6 +321,8 @@ def transcribe_video(
     video_title: str = "untitled video",
     video_context: str = "",
     target_language: str = "",
+    start_time: str = "",
+    end_time: str = "",
     prompt: str | None = None,
     log_callback=None,
 ) -> str:
@@ -302,6 +341,10 @@ def transcribe_video(
         target_language: when non-empty, switches to the 6-column variant that
                          adds a translated_text column. Substituted into
                          {target_language}.
+        start_time: optional segment start time (mm:ss or hh:mm:ss). When set
+                    along with or without end_time, the prompt tells Gemini to
+                    transcribe only that segment of the video.
+        end_time:   optional segment end time. Same format as start_time.
         prompt: optional custom prompt string. If omitted or blank, uses the
                 appropriate default (with or without translation).
         log_callback: optional callable(str) for status updates
@@ -327,8 +370,14 @@ def transcribe_video(
 
     title_for_prompt = (video_title or "").strip() or "untitled video"
     context_for_prompt = (video_context or "").strip() or "(no additional context provided)"
+    segment_instruction = _build_segment_instruction(start_time, end_time)
     effective_prompt = _render_prompt(
-        effective_prompt, source_language, title_for_prompt, context_for_prompt, target,
+        effective_prompt,
+        source_language,
+        title_for_prompt,
+        context_for_prompt,
+        target,
+        segment_instruction,
     )
 
     # CSV column count drives the cleanup pass.
@@ -352,10 +401,18 @@ def transcribe_video(
         uploaded = _wait_until_active(client, uploaded, log_callback)
 
         if log_callback:
+            segment_note = ""
+            if segment_instruction:
+                segment_note = f" (segment only: {start_time or '0:00'} to {end_time or 'end'})"
             if translation_on:
-                log_callback(f"Transcribing and translating to {target} (this can take several minutes)...")
+                log_callback(
+                    f"Transcribing and translating to {target}{segment_note} "
+                    f"(this can take several minutes)..."
+                )
             else:
-                log_callback("Transcribing (this can take several minutes)...")
+                log_callback(
+                    f"Transcribing{segment_note} (this can take several minutes)..."
+                )
 
         def _generate():
             return client.models.generate_content(

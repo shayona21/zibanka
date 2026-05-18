@@ -1,0 +1,361 @@
+#%% libraries
+import pandas as pd
+import json
+# pip install google-genai
+
+import os
+import time
+from pathlib import Path
+from google import genai
+from google.genai import types
+
+#constants 
+MODEL_NAME = "gemini-2.5-flash"
+BATCH_SIZE = 50
+
+#%% helpers 
+def srt_to_dataframe(file_path):
+    """
+    Convert SRT subtitle file into pandas DataFrame.
+
+    Output columns:
+    index, start_time, end_time, dialogue
+
+    Multi-line subtitles are preserved using <n>
+    """
+
+    with open(file_path, "r", encoding="utf-8") as file:
+        content = file.read()
+
+    blocks = content.strip().split("\n\n")
+
+    rows = []
+
+    for block in blocks:
+        lines = block.strip().split("\n")
+
+        if len(lines) < 3:
+            continue
+
+        subtitle_index = lines[0].strip()
+
+        time_line = lines[1].strip()
+        start_time, end_time = time_line.split(" --> ")
+
+        # Preserve subtitle line breaks
+        dialogue = "<n>".join(lines[2:]).strip()
+
+        rows.append({
+            "index": int(subtitle_index),
+            "start_time": start_time,
+            "end_time": end_time,
+            "dialogue": dialogue
+        })
+
+    df = pd.DataFrame(rows)
+
+    return df
+
+
+def trim_df(df): 
+    return df[["index", "dialogue"]].copy()
+
+
+def split_dataframe_into_batches(df, batch_size=BATCH_SIZE):
+    """
+    Split dataframe into sequential batches.
+
+    Returns:
+        List of smaller dataframes
+    """
+
+    batches = []
+
+    for start_idx in range(0, len(df), batch_size):
+        batch_df = df.iloc[start_idx:start_idx + batch_size]
+        batches.append(batch_df)
+
+    return batches
+
+# %%
+
+def dataframe_batch_to_json(batch_df):
+    """
+    Convert dataframe batch into JSON string.
+
+    Output format:
+    [
+        {
+            "index": 1,
+            "dialogue": "hello"
+        }
+    ]
+    """
+
+    records = batch_df.to_dict(orient="records")
+
+    json_string = json.dumps(
+        records,
+        ensure_ascii=False,
+        indent=2
+    )
+
+    return json_string
+# %% gemini stuff
+
+def build_transliteration_prompt(input_language, output_language=None):
+    """
+    Builds the instruction prompt for Gemini.
+    """
+
+    if output_language is None:
+        output_language = input_language
+
+    prompt = f"""
+                You are given a JSON array containing subtitle dialogue from an SRT file.
+
+                Each object contains:
+                - "index"
+                - "dialogue"
+
+                The dialogue is written in Romanized {input_language}.
+
+                Your task is to transliterate the dialogue into native {input_language} script.
+
+                Rules:
+                1. Preserve the exact JSON structure.
+                2. Preserve the exact "index" value.
+                3. Return ONE output object for every input object.
+                4. Do not reorder rows.
+                5. Do not omit any rows.
+                6. Do not add explanations or commentary.
+                7. Do not wrap the output in markdown.
+                8. Output STRICT VALID JSON ONLY.
+
+                For each object:
+                - Keep the original "dialogue" unchanged.
+                - Add a new field called "translit_dialogue".
+
+                Special Rules:
+                - Preserve any "<n>" characters exactly as they appear.
+                - If you encounter "XXX", preserve it exactly.
+                - Do not remove words or shorten sentences.
+                - Maintain the intended meaning and tone of the dialogue.
+                - Do not include reference links.
+
+                SDH Rule:
+                If dialogue starts with "SDH":
+                - Translate the bracketed English text into {output_language}.
+                - Keep the text "SDH" itself in English.
+
+                Return only a JSON array.
+                """
+    return prompt.strip()
+
+def call_gemini_for_batch(
+    client,
+    batch_json,
+    input_language,
+    output_language=None,
+    model_name=MODEL_NAME
+):
+    """
+    Sends one JSON batch to Gemini and returns parsed JSON output.
+    """
+
+    prompt = build_transliteration_prompt(input_language, output_language)
+
+    full_prompt = f"""
+                    {prompt}
+
+                    Here is the input JSON array:
+                    {batch_json}
+                    """
+
+    response = client.models.generate_content(
+        model=model_name,
+        contents=full_prompt,
+        config=types.GenerateContentConfig(
+            temperature=0,
+            response_mime_type="application/json"
+        )
+    )
+
+    response_text = response.text.strip()
+
+    return json.loads(response_text)
+
+
+def normalize_batch_result(batch_result, batch_num):
+    """
+    Validate Gemini output for one batch and normalize it to a list of dicts.
+    """
+
+    if isinstance(batch_result, dict):
+        batch_result = [batch_result]
+
+    if not isinstance(batch_result, list):
+        raise ValueError(
+            f"Batch {batch_num} returned {type(batch_result).__name__}, expected a JSON array."
+        )
+
+    normalized_rows = []
+
+    for row_num, row in enumerate(batch_result, start=1):
+        if not isinstance(row, dict):
+            raise ValueError(
+                f"Batch {batch_num}, row {row_num} returned {type(row).__name__}, expected an object."
+            )
+
+        if "index" not in row or "translit_dialogue" not in row:
+            raise ValueError(
+                f"Batch {batch_num}, row {row_num} is missing required keys. "
+                f"Found keys: {sorted(row.keys())}"
+            )
+
+        normalized_rows.append(row)
+
+    return normalized_rows
+
+
+def emit_progress(progress_callback, current_batch, total_batches, message):
+    if progress_callback is None:
+        return
+
+    progress_callback(
+        {
+            "current_batch": current_batch,
+            "total_batches": total_batches,
+            "percent": int((current_batch / total_batches) * 100) if total_batches else 100,
+            "message": message,
+        }
+    )
+
+#running transliteration for each 50 row batch in an episode dialogue SRT file
+#%%
+def main(
+    file_path,
+    input_language,
+    output_language=None,
+    batch_size=BATCH_SIZE,
+    progress_callback=None
+):
+
+    #converts srt file to dataframe, trims dataframe
+    df = srt_to_dataframe(file_path)
+    #trims to only index and dialogue columns
+    trimmed_df = trim_df(df)
+
+    #connects to gemini client and passes API key 
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is not set.")
+
+    client = genai.Client(api_key=api_key)
+
+    #splits dataframe into batches of 50 rows
+    batch_list = split_dataframe_into_batches(trimmed_df, batch_size=batch_size)
+    total_batches = len(batch_list)
+
+    all_results = []
+
+    #iterates thru each batch, sends to gemini 
+    for batch_num, batch_df in enumerate(batch_list):
+        batch_message = f"Processing batch {batch_num + 1} of {total_batches}"
+        print(batch_message)
+        emit_progress(progress_callback, batch_num, total_batches, batch_message)
+
+        batch_json = dataframe_batch_to_json(batch_df)
+
+        #gemini prompt written inside call_gemini_for_batch()
+        batch_result = call_gemini_for_batch(
+            client = client,
+            batch_json = batch_json,
+            input_language=input_language,
+            output_language=output_language
+        )
+        response_message = f"Gemini batch {batch_num + 1} response received."
+        print(response_message)
+
+        normalized_batch_result = normalize_batch_result(
+            batch_result=batch_result,
+            batch_num=batch_num + 1
+        )
+
+        all_results.extend(normalized_batch_result)
+        emit_progress(progress_callback, batch_num + 1, total_batches, response_message)
+
+        time.sleep(1) #sleep 1 second between each batch
+        
+
+    #gemini output is a list of dictionaries
+    gemini_output_df = pd.DataFrame(all_results)
+
+    #merges gemini output with original dataframe
+    final_df = df.merge(
+        gemini_output_df[["index", "translit_dialogue"]],
+        on="index",
+        how="left"
+    )
+
+    emit_progress(progress_callback, total_batches, total_batches, "Merging batch results.")
+
+    return gemini_output_df, final_df
+
+
+def process_srt_file(
+    file_path,
+    input_language,
+    output_language=None,
+    output_dir="output",
+    progress_callback=None
+):
+    """
+    Run transliteration for an SRT file and write the processed SRT to disk.
+    """
+
+    _, final_df = main(
+        file_path=file_path,
+        input_language=input_language,
+        output_language=output_language,
+        progress_callback=progress_callback
+    )
+
+    output_dir_path = Path(output_dir)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
+
+    input_path = Path(file_path)
+    output_filename = f"{input_path.stem}_processed.srt"
+    output_path = output_dir_path / output_filename
+
+    dataframe_to_srt(final_df, output_path)
+    emit_progress(progress_callback, 1, 1, f"Output ready: {output_filename}")
+
+    return output_path
+# %% converting final df back to srt file
+
+def dataframe_to_srt(final_df, output_path):
+    srt_blocks = []
+
+    for _, row in final_df.iterrows():
+
+        subtitle_index = int(row["index"])
+        start_time = row["start_time"]
+        end_time = row["end_time"]
+
+        if pd.notna(row["translit_dialogue"]):
+            subtitle_text = row["translit_dialogue"]
+        else:
+            subtitle_text = row["dialogue"]
+
+        subtitle_text = subtitle_text.replace("<n>", "\n")
+
+        block = f"{subtitle_index}\n{start_time} --> {end_time}\n{subtitle_text}"
+        srt_blocks.append(block)
+
+    srt_content = "\n\n".join(srt_blocks)
+
+    with open(output_path, "w", encoding="utf-8") as file:
+        file.write(srt_content)
+
+    print(f"SRT file saved to: {output_path}")

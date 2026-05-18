@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video Transcriber</title>
+<style>
+  html { background-color: #f7f7f7; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+    color: #222;
+    line-height: 1.5;
+    background-color: #f7f7f7;
+  }
+  .page-header {
+    margin-bottom: 24px;
+  }
+  .logo-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+  }
+  .logo-row img {
+    max-height: 54px;
+    max-width: 180px;
+    height: auto;
+    width: auto;
+  }
+  .header-spacer {
+    height: 20px;
+  }
+  h1 { font-size: 32px; margin: 0 0 4px 0; }
+  p.subtitle { color: #666; margin-top: 0; }
+  form { border: 1px solid #ddd; padding: 16px; border-radius: 6px; margin-bottom: 24px; }
+  label { display: block; font-weight: 600; margin: 10px 0 4px; }
+  textarea, select, input[type=submit], button {
+    font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { width: 100%; box-sizing: border-box; padding: 8px; }
+  select { padding: 6px; }
+  .row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 200px; }
+  button, input[type=submit] {
+    background: #2a6; color: white; border: 0; padding: 8px 16px;
+    border-radius: 4px; cursor: pointer;
+  }
+  button.secondary { background: #888; }
+  button.retry { background: #c63; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+  th, td { border-bottom: 1px solid #eee; padding: 8px 6px; text-align: left; vertical-align: top; }
+  th { background: #f6f6f6; font-size: 13px; }
+  .status-queued { color: #888; }
+  .status-running { color: #26a; font-weight: 600; }
+  .status-done { color: #2a6; font-weight: 600; }
+  .status-failed { color: #c33; font-weight: 600; }
+  .log {
+    background: #fafafa; border: 1px solid #eee; padding: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto;
+    margin-top: 4px;
+  }
+  .link-cell { font-size: 12px; color: #555; word-break: break-all; max-width: 260px; }
+  .error-cell { color: #c33; font-size: 13px; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; font-size: 12px; color: #555; }
+  .batch-meta { color: #666; font-size: 13px; margin-bottom: 12px; }
+  .hint { font-size: 12px; color: #666; margin-top: 4px; }
+  .used-prompt {
+    background: #fafafa; border: 1px solid #eee; padding: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; white-space: pre-wrap; margin-top: 4px;
+  }
+  .disk-panel {
+    border: 1px solid #ddd; border-radius: 6px; padding: 12px 16px;
+    margin-bottom: 24px; background: #fafafa;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 12px;
+  }
+  .disk-panel .info { font-size: 14px; }
+  .disk-panel .info strong { font-size: 16px; }
+  .disk-panel .actions { display: flex; gap: 8px; }
+  button.danger { background: #b33; }
+  .flash {
+    border: 1px solid #bce; background: #eef7ff; color: #246;
+    padding: 10px 14px; border-radius: 4px; margin-bottom: 16px;
+    font-size: 14px;
+  }
+  .link-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .link-row .row-num {
+    font-weight: 600;
+    color: #888;
+    width: 18px;
+    text-align: right;
+  }
+  .link-row input[type=text] {
+    padding: 8px;
+    box-sizing: border-box;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+  }
+  .link-row .title-input { flex: 0 0 220px; }
+  .link-row .link-input { flex: 1; }
+  .link-headers {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 4px;
+    font-size: 12px;
+    color: #666;
+    font-weight: 600;
+  }
+  .link-headers .row-num { width: 18px; }
+  .link-headers .title-h { flex: 0 0 220px; }
+  .link-headers .link-h { flex: 1; }
+  .video-block {
+    border-top: 1px solid #e0e0e0;
+    padding-top: 12px;
+    margin-top: 12px;
+  }
+  .video-block.first { border-top: 0; padding-top: 0; margin-top: 0; }
+  .context-row {
+    margin-top: 6px;
+    margin-left: 28px;
+  }
+  .context-row label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #555;
+    margin: 0 0 2px 0;
+  }
+  .context-row textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    resize: vertical;
+  }
+  .context-row .hint { margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div class="logo-row">
+    <img src="{{ url_for('static', filename='zibanka_logo.jpeg') }}" alt="Company logo">
+  </div>
+  <h1>Video Transcriber</h1>
+  <p class="subtitle">Add up to {{ max_links }} public Google Drive video links. Each row takes one link, an optional title (used to name the output files), and an optional context box. Do not close this terminal while a batch is running.</p>
+</div>
+<div class="header-spacer"></div>
+
+{% if cleanup_msg %}
+  <div class="flash">{{ cleanup_msg }}</div>
+{% endif %}
+
+{% if not batch or batch.status == "done" %}
+  {# Idle state: show the form #}
+  <form method="post" action="/start">
+    <label>Videos (up to {{ max_links }})</label>
+    <div class="link-headers">
+      <span class="row-num"></span>
+      <span class="title-h">Title (optional, used for filename)</span>
+      <span class="link-h">Google Drive link</span>
+    </div>
+    {% for slot in range(1, max_links + 1) %}
+    <div class="video-block{% if slot == 1 %} first{% endif %}">
+      <div class="link-row">
+        <span class="row-num">{{ slot }}.</span>
+        <input class="title-input" type="text" name="title_{{ slot }}" placeholder="e.g. Q1 town hall" maxlength="80">
+        <input class="link-input" type="text" name="link_{{ slot }}" placeholder="https://drive.google.com/file/d/.../view?usp=sharing">
+      </div>
+      <div class="context-row">
+        <label for="context_{{ slot }}">Video context (optional)</label>
+        <textarea id="context_{{ slot }}" name="context_{{ slot }}" rows="2" maxlength="2000" placeholder="Add the TV series name, character names, plot summary, or any other context that would help Gemini transcribe more accurately."></textarea>
+      </div>
+    </div>
+    {% endfor %}
+    <div class="hint" style="margin-top:12px;">Leave a row blank to skip it. If you don't enter a title, the file will be named generically (video1, video2, video3).</div>
+
+    <div class="row">
+      <div>
+        <label for="source_language">Video language (source)</label>
+        <select id="source_language" name="source_language">
+          {% for lang in languages %}
+            <option value="{{ lang }}"{% if lang == "Hindi" %} selected{% endif %}>{{ lang }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="target_language">Translation</label>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <label style="display:flex; align-items:center; gap:6px; font-weight:normal;">
+            <input type="checkbox" id="translate" name="translate" value="1" onchange="toggleTargetLanguage()">
+            Translate?
+          </label>
+          <select id="target_language" name="target_language" disabled>
+            {% for lang in languages %}
+              <option value="{{ lang }}"{% if lang == "English" %} selected{% endif %}>{{ lang }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="hint">When ticked, adds a translated_text column to the CSV/XLSX. Source and target must differ.</div>
+      </div>
+    </div>
+
+    <script>
+      function toggleTargetLanguage() {
+        var cb = document.getElementById('translate');
+        var sel = document.getElementById('target_language');
+        sel.disabled = !cb.checked;
+      }
+    </script>
+
+    <div style="margin-top: 16px;">
+      <input type="submit" value="Start batch">
+    </div>
+  </form>
+{% endif %}
+
+{% if batch %}
+  <h2 style="font-size:18px;">Batch {{ batch.id }} &middot; <span class="status-{{ batch.status }}">{{ batch.status|capitalize }}</span></h2>
+  <div class="batch-meta">
+    Source language: <strong>{{ batch.source_language }}</strong> &nbsp;|&nbsp;
+    Translation: <strong>{% if batch.target_language %}{{ batch.target_language }}{% else %}off{% endif %}</strong> &nbsp;|&nbsp;
+    Started: {{ batch.started_at }}
+    {% if batch.finished_at %} &nbsp;|&nbsp; Finished: {{ batch.finished_at }}{% endif %}
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Link</th>
+        <th>Step</th>
+        <th>Elapsed</th>
+        <th>Outputs</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in batch.videos %}
+      <tr>
+        <td>{{ v.index }}</td>
+        <td class="link-cell">
+          {% if v.title %}<div style="font-weight:600; color:#222; word-break:normal; margin-bottom:2px;">{{ v.title }}</div>{% endif %}
+          {{ v.link }}
+          {% if v.context %}
+            <details style="margin-top:4px;">
+              <summary>Show context</summary>
+              <div class="used-prompt">{{ v.context }}</div>
+            </details>
+          {% endif %}
+        </td>
+        <td>
+          <span class="status-{{ v.status }}">{{ v.step }}</span>
+          {% if v.status == "failed" and v.error %}
+            <div class="error-cell">{{ v.error }}</div>
+          {% endif %}
+          {% if v.log %}
+            <details>
+              <summary>Show log ({{ v.log|length }} lines)</summary>
+              <div class="log">{% for line in v.log %}{{ line }}
+{% endfor %}</div>
+            </details>
+          {% endif %}
+        </td>
+        <td>
+          {% if v.elapsed_seconds %}
+            {{ (v.elapsed_seconds // 60) }}m {{ (v.elapsed_seconds % 60) }}s
+          {% else %}
+            &mdash;
+          {% endif %}
+        </td>
+        <td>
+          {% if v.transcript_file %}
+            <div><a href="/outputs/{{ v.transcript_file }}">Transcript (CSV)</a></div>
+          {% endif %}
+          {% if v.transcript_xlsx_file %}
+            <div><a href="/outputs/{{ v.transcript_xlsx_file }}">Transcript (XLSX)</a></div>
+          {% endif %}
+          {% if not v.transcript_file and not v.transcript_xlsx_file %}
+            &mdash;
+          {% endif %}
+        </td>
+        <td>
+          {% if v.status == "failed" and batch.status == "done" %}
+            <form method="post" action="/retry/{{ v.index }}" style="display:inline;">
+              <button class="retry" type="submit">Retry</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if batch.status == "done" %}
+    <form method="post" action="/new" style="display:inline;">
+      <button class="secondary" type="submit">Start a new batch</button>
+    </form>
+  {% else %}
+    <p class="subtitle">This page auto-refreshes every 5 seconds while the batch is running. You can safely close this tab; processing will continue on the server.</p>
+  {% endif %}
+{% endif %}
+
+{% if batch and batch.status == "running" %}
+<script>
+  // Auto-refresh the page every 5 seconds while running.
+  setTimeout(function() { window.location.reload(); }, 5000);
+</script>
+{% endif %}
+
+<div class="disk-panel" style="margin-top: 32px;">
+  <div class="info">
+    Downloads folder: <strong>{{ downloads_info.file_count }}</strong> file(s),
+    <strong>{{ downloads_info.total_mb }} MB</strong>
+    <div class="hint">Videos are downloaded here temporarily. Successful transcriptions auto-delete their videos. Files from failed videos are kept for retry.</div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/cleanup" style="display:inline;"
+          onsubmit="return confirm('Delete all files in downloads/ that are NOT reserved for retry?');">
+      <button class="secondary" type="submit" {% if downloads_info.file_count == 0 %}disabled{% endif %}>Clean up</button>
+    </form>
+    <form method="post" action="/cleanup" style="display:inline;"
+          onsubmit="return confirm('FORCE DELETE everything in downloads/? This will prevent retrying any currently-failed videos without re-downloading.');">
+      <input type="hidden" name="force" value="1">
+      <button class="danger" type="submit" {% if downloads_info.file_count == 0 %}disabled{% endif %}>Force clean</button>
+    </form>
+  </div>
+</div>
+
+</body>
+</html>

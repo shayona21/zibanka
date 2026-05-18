@@ -108,6 +108,70 @@ def filename_prefix(video: dict) -> str:
     return safe_slug(title)[:80] or fallback
 
 
+# -------------------------------------------------------------------
+# Time range parsing helpers
+# -------------------------------------------------------------------
+def parse_mmss(value: str) -> int | None:
+    """
+    Parse an 'mm:ss' string into total seconds. Returns None if the input
+    is blank. Raises ValueError with a friendly message if the input is
+    present but malformed.
+
+    Accepts: '5:30', '05:30', '0:00', '99:59', and a whole-minute count
+    like '5' (treated as 5:00).
+    Rejects: 'abc', '5.30', '5:60', '-1:00', '1:2:3', anything non-numeric.
+    """
+    if value is None:
+        return None
+    s = value.strip()
+    if not s:
+        return None
+
+    # Whole-number minutes (no colon): "5" -> 5 minutes = 300 seconds
+    if ":" not in s:
+        if not s.isdigit():
+            raise ValueError(f"'{value}' is not a valid time. Use mm:ss format (e.g. 05:30).")
+        return int(s) * 60
+
+    parts = s.split(":")
+    if len(parts) != 2:
+        raise ValueError(f"'{value}' is not a valid time. Use mm:ss format (e.g. 05:30).")
+    mm_str, ss_str = parts
+    if not mm_str.isdigit() or not ss_str.isdigit():
+        raise ValueError(f"'{value}' is not a valid time. Use mm:ss format (e.g. 05:30).")
+    mm = int(mm_str)
+    ss = int(ss_str)
+    if ss >= 60:
+        raise ValueError(f"'{value}' has invalid seconds (must be 0-59). Use mm:ss format.")
+    return mm * 60 + ss
+
+
+def format_mmss(total_seconds: int | None) -> str:
+    """Format total seconds back to mm:ss. Used for display in the status table."""
+    if total_seconds is None:
+        return ""
+    m = total_seconds // 60
+    s = total_seconds % 60
+    return f"{m}:{s:02d}"
+
+
+def format_segment_label(video: dict) -> str:
+    """
+    Format a short segment label for the status table. The template prepends
+    'Segment: ' so we return just the range part.
+    Returns "" if neither start nor end is set.
+    """
+    start_sec = video.get("segment_start")
+    end_sec = video.get("segment_end")
+    if start_sec is None and end_sec is None:
+        return ""
+    if start_sec is not None and end_sec is not None:
+        return f"{format_mmss(start_sec)}\u2013{format_mmss(end_sec)}"
+    if start_sec is not None:
+        return f"from {format_mmss(start_sec)}"
+    return f"until {format_mmss(end_sec)}"
+
+
 def download_drive_video(link: str, target_path: Path, log) -> Path:
     """Download a public Google Drive video to target_path. Returns the actual path used."""
     file_id = extract_drive_id(link)
@@ -301,6 +365,7 @@ def run_batch(batch_id: str):
 
         start_time = time.time()
         local_video_path: Path | None = None
+        segment_video_path: Path | None = None
 
         try:
             # Step 1: Download from Drive
@@ -308,15 +373,19 @@ def run_batch(batch_id: str):
             tmp_path = DOWNLOADS_DIR / tmp_name
             local_video_path = download_drive_video(video["link"], tmp_path, log)
 
-            # Step 2: Transcribe
+            # Step 2: Transcribe (with optional segment range passed in the prompt)
             with BATCH_LOCK:
                 video["step"] = "Transcribing"
+            start_sec = video.get("segment_start")
+            end_sec = video.get("segment_end")
             transcript = transcribe.transcribe_video(
                 str(local_video_path),
                 source_language=source_lang,
                 video_title=video.get("title", ""),
                 video_context=video.get("context", ""),
                 target_language=target_lang,
+                start_time=format_mmss(start_sec),
+                end_time=format_mmss(end_sec),
                 prompt=prompt,
                 log_callback=log,
             )
@@ -350,13 +419,19 @@ def run_batch(batch_id: str):
             # NOTE: Translation step intentionally removed. translate_text() in
             # transcribe.py is preserved as dead code for future re-enablement.
 
-            # Success: clean up the local video file.
+            # Success: clean up the local video files (full download + segment).
             try:
                 if local_video_path and local_video_path.exists():
                     local_video_path.unlink()
                     log("Cleaned up local video file.")
             except Exception as e:
                 log(f"Warning: could not delete local video file: {e}")
+            try:
+                if segment_video_path and segment_video_path.exists():
+                    segment_video_path.unlink()
+                    log("Cleaned up local segment file.")
+            except Exception as e:
+                log(f"Warning: could not delete local segment file: {e}")
 
             with BATCH_LOCK:
                 video["status"] = "done"
@@ -416,6 +491,7 @@ def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: 
 
     start_time = time.time()
     local_video_path: Path | None = None
+    segment_video_path: Path | None = None
 
     try:
         tmp_name = f"batch_{batch_id}_video_{idx}.mp4"
@@ -429,6 +505,10 @@ def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: 
         else:
             local_video_path = download_drive_video(video["link"], tmp_path, log)
 
+        # If a time range was requested, it will be passed in the prompt.
+        start_sec = video.get("segment_start")
+        end_sec = video.get("segment_end")
+
         with BATCH_LOCK:
             video["step"] = "Transcribing"
         transcript = transcribe.transcribe_video(
@@ -437,6 +517,8 @@ def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: 
             video_title=video.get("title", ""),
             video_context=video.get("context", ""),
             target_language=target_lang,
+            start_time=format_mmss(start_sec),
+            end_time=format_mmss(end_sec),
             prompt=prompt,
             log_callback=log,
         )
@@ -460,6 +542,11 @@ def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: 
         try:
             if local_video_path and local_video_path.exists():
                 local_video_path.unlink()
+        except Exception:
+            pass
+        try:
+            if segment_video_path and segment_video_path.exists():
+                segment_video_path.unlink()
         except Exception:
             pass
 
@@ -487,7 +574,12 @@ def index():
     with BATCH_LOCK:
         batch_snapshot = BATCH.copy() if BATCH else None
         if batch_snapshot:
-            batch_snapshot["videos"] = [v.copy() for v in BATCH["videos"]]
+            videos_copy = []
+            for v in BATCH["videos"]:
+                vc = v.copy()
+                vc["segment_display"] = format_segment_label(vc)
+                videos_copy.append(vc)
+            batch_snapshot["videos"] = videos_copy
     return render_template(
         "index.html",
         languages=SUPPORTED_LANGUAGES,
@@ -535,33 +627,49 @@ def start():
 
     # Read up to MAX_LINKS_PER_BATCH separate link fields and matching title
     # and context fields. Empty rows are skipped so the user can submit 1, 2, or 3 videos.
-    submissions = []  # list of (link, title, context) tuples in submission order
+    submissions = []  # list of (link, title, context, start_sec, end_sec) tuples in submission order
     for slot in range(1, MAX_LINKS_PER_BATCH + 1):
         link = request.form.get(f"link_{slot}", "").strip()
         title = request.form.get(f"title_{slot}", "").strip()
         context = request.form.get(f"context_{slot}", "").strip()
-        if not link and not title and not context:
+        start_str = request.form.get(f"start_{slot}", "").strip()
+        end_str = request.form.get(f"end_{slot}", "").strip()
+        if not link and not title and not context and not start_str and not end_str:
             continue  # empty row, skip
         if not link:
-            return f"Row {slot} has a title or context but no Google Drive link.", 400
+            return f"Row {slot} has data but no Google Drive link.", 400
         if not extract_drive_id(link):
             return f"Could not parse a Google Drive file ID from row {slot}: {link}", 400
         # Defensive cap on context length matches the textarea maxlength.
         if len(context) > 2000:
             return f"Row {slot} video context is too long ({len(context)} chars); max 2000.", 400
-        submissions.append((link, title, context))
+        # Parse optional time range. Either or both may be blank.
+        try:
+            start_sec = parse_mmss(start_str)
+            end_sec = parse_mmss(end_str)
+        except ValueError as e:
+            return f"Row {slot} time range: {e}", 400
+        if start_sec is not None and end_sec is not None and end_sec <= start_sec:
+            return (
+                f"Row {slot} time range: end time ({end_str}) must be after "
+                f"start time ({start_str}).",
+                400,
+            )
+        submissions.append((link, title, context, start_sec, end_sec))
 
     if not submissions:
         return "Please paste at least one Google Drive link.", 400
 
     batch_id = uuid.uuid4().hex[:8]
     videos = []
-    for i, (link, title, context) in enumerate(submissions, start=1):
+    for i, (link, title, context, start_sec, end_sec) in enumerate(submissions, start=1):
         videos.append({
             "index": i,
             "link": link,
             "title": title,  # may be empty string; filename code falls back to videoN
             "context": context,  # may be empty string
+            "segment_start": start_sec,  # int seconds or None
+            "segment_end": end_sec,  # int seconds or None
             "status": "queued",
             "step": "Queued",
             "elapsed_seconds": 0,
