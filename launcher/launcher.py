@@ -3,7 +3,7 @@ from pathlib import Path
 from flask import Flask, render_template, send_from_directory
 
 
-FIXING_SRT_DELAY_URL = "https://example.com/fixing-srt-delay"
+FIXING_SRT_DELAY_URL = "http://35.225.88.95:5001"
 TRANSCRIPTION_PROJECT_URL = "http://35.225.88.95:5000/"
 BASE_DIR = Path(__file__).resolve().parent
 LOGO_DIR = BASE_DIR.parent / "fixing_srt_delay"
