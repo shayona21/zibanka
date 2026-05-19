@@ -39,7 +39,33 @@
         }
 
         .hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 20px;
             margin-bottom: 22px;
+        }
+
+        .hero-copy {
+            flex: 1;
+        }
+
+        .hero-logo {
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(215, 223, 235, 0.95);
+            border-radius: 14px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        }
+
+        .hero-logo img {
+            display: block;
+            width: auto;
+            height: 48px;
         }
 
         .hero h1 {
@@ -285,6 +311,15 @@
                 font-size: 28px;
             }
 
+            .hero {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .hero-logo img {
+                height: 40px;
+            }
+
             .job-grid {
                 grid-template-columns: 1fr;
             }
@@ -300,8 +335,13 @@
 <body>
     <div class="page">
         <div class="hero">
-            <h1>SRT Processor</h1>
-            <p>Upload an SRT file, choose the source and target language, and follow the batch progress live while the output file is prepared.</p>
+            <div class="hero-copy">
+                <h1>SRT Processor</h1>
+                <p>Upload an SRT file, choose the input language, and follow the batch progress live while the output file is prepared.</p>
+            </div>
+            <div class="hero-logo" aria-label="Zibanka logo">
+                <img src="{{ url_for('asset', filename='zibanka_logo.jpeg') }}" alt="Zibanka logo">
+            </div>
         </div>
 
         <div class="layout">
@@ -316,11 +356,6 @@
                     <div class="field">
                         <label for="input_language">Input language</label>
                         <input id="input_language" name="input_language" type="text" placeholder="Kannada" required>
-                    </div>
-
-                    <div class="field">
-                        <label for="output_language">Output language</label>
-                        <input id="output_language" name="output_language" type="text" placeholder="Kannada" required>
                     </div>
 
                     <div class="button-row">
@@ -369,12 +404,12 @@
                         <span class="stat-value" id="job-input-language">{{ active_job.input_language }}</span>
                     </div>
                     <div class="stat">
-                        <span class="stat-label">Output language</span>
-                        <span class="stat-value" id="job-output-language">{{ active_job.output_language }}</span>
-                    </div>
-                    <div class="stat">
                         <span class="stat-label">Current state</span>
                         <span class="stat-value" id="job-state">{{ active_job.status|capitalize }}</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">File name</span>
+                        <span class="stat-value">{{ active_job.filename }}</span>
                     </div>
                 </div>
 

@@ -3,7 +3,7 @@ import threading
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Flask, jsonify, render_template, request, send_file, url_for
+from flask import Flask, jsonify, render_template, request, send_file, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
 from main import process_srt_file
@@ -47,13 +47,12 @@ def allowed_file(filename):
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
-def create_job(filename, input_language, output_language):
+def create_job(filename, input_language):
     job_id = uuid4().hex
     job = {
         "id": job_id,
         "filename": filename,
         "input_language": input_language,
-        "output_language": output_language,
         "status": "queued",
         "progress": 0,
         "current_batch": 0,
@@ -135,6 +134,11 @@ def index():
             active_job = jobs.get(job_id)
 
     return render_template("index.html", active_job=active_job)
+
+
+@app.route("/assets/<path:filename>", methods=["GET"])
+def asset(filename):
+    return send_from_directory(BASE_DIR, filename)
 
 
 @app.route("/process", methods=["POST"])

@@ -102,14 +102,10 @@ def dataframe_batch_to_json(batch_df):
 
     return json_string
 # %% gemini stuff
-
-def build_transliteration_prompt(input_language, output_language=None):
+def build_transliteration_prompt(input_language):
     """
-    Builds the instruction prompt for Gemini.
-    """
+    Builds the instruction prompt for Gemini."""
 
-    if output_language is None:
-        output_language = input_language
 
     prompt = f"""
                 You are given a JSON array containing subtitle dialogue from an SRT file.
@@ -145,7 +141,7 @@ def build_transliteration_prompt(input_language, output_language=None):
 
                 SDH Rule:
                 If dialogue starts with "SDH":
-                - Translate the bracketed English text into {output_language}.
+                - Translate the bracketed English text into {input_language}.
                 - Keep the text "SDH" itself in English.
 
                 Return only a JSON array.
@@ -153,17 +149,15 @@ def build_transliteration_prompt(input_language, output_language=None):
     return prompt.strip()
 
 def call_gemini_for_batch(
-    client,
-    batch_json,
-    input_language,
-    output_language=None,
-    model_name=MODEL_NAME
-):
+            client,
+            batch_json,
+            input_language,
+            model_name=MODEL_NAME):
     """
     Sends one JSON batch to Gemini and returns parsed JSON output.
     """
 
-    prompt = build_transliteration_prompt(input_language, output_language)
+    prompt = build_transliteration_prompt(input_language)
 
     full_prompt = f"""
                     {prompt}
@@ -236,7 +230,6 @@ def emit_progress(progress_callback, current_batch, total_batches, message):
 def main(
     file_path,
     input_language,
-    output_language=None,
     batch_size=BATCH_SIZE,
     progress_callback=None
 ):
@@ -271,9 +264,8 @@ def main(
         batch_result = call_gemini_for_batch(
             client = client,
             batch_json = batch_json,
-            input_language=input_language,
-            output_language=output_language
-        )
+            input_language=input_language)
+        
         response_message = f"Gemini batch {batch_num + 1} response received."
         print(response_message)
 
@@ -306,7 +298,6 @@ def main(
 def process_srt_file(
     file_path,
     input_language,
-    output_language=None,
     output_dir="output",
     progress_callback=None
 ):
@@ -317,7 +308,6 @@ def process_srt_file(
     _, final_df = main(
         file_path=file_path,
         input_language=input_language,
-        output_language=output_language,
         progress_callback=progress_callback
     )
 
