@@ -5,95 +5,72 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SRT Processor</title>
     <style>
-        :root {
-            color-scheme: light;
-            --bg: #f4f6fb;
-            --panel: #ffffff;
-            --panel-border: #d7dfeb;
-            --text: #182230;
-            --muted: #5f6f86;
-            --accent: #3b82f6;
-            --accent-soft: #dbeafe;
-            --success: #1f7a4c;
-            --success-soft: #dcfce7;
-            --error: #b42318;
-            --error-soft: #fee4e2;
-            --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
-        }
+        html { background-color: #f7f7f7; }
 
         * {
             box-sizing: border-box;
         }
 
         body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
-            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px 40px;
+            color: #222;
+            line-height: 1.5;
+            background-color: #f7f7f7;
         }
 
         .page {
-            max-width: 920px;
-            margin: 0 auto;
-            padding: 32px 18px 56px;
+            width: 100%;
         }
 
         .hero {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 20px;
-            margin-bottom: 22px;
+            margin-bottom: 24px;
         }
 
         .hero-copy {
-            flex: 1;
+            margin-top: 0;
         }
 
         .hero-logo {
-            flex-shrink: 0;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 10px 12px;
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(215, 223, 235, 0.95);
-            border-radius: 14px;
-            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 8px;
         }
 
         .hero-logo img {
-            display: block;
+            max-height: 54px;
+            max-width: 180px;
+            height: auto;
             width: auto;
-            height: 48px;
         }
 
         .hero h1 {
-            margin: 0 0 8px;
-            font-size: 34px;
+            font-size: 32px;
+            margin: 0 0 4px 0;
         }
 
         .hero p {
             margin: 0;
-            color: var(--muted);
-            max-width: 620px;
+            color: #666;
+            max-width: 680px;
         }
 
         .layout {
             display: grid;
-            gap: 18px;
+            gap: 24px;
         }
 
         .panel {
-            background: var(--panel);
-            border: 1px solid var(--panel-border);
-            border-radius: 8px;
-            box-shadow: var(--shadow);
-            padding: 22px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 16px;
         }
 
         .panel h2 {
-            margin: 0 0 18px;
+            margin: 0 0 16px;
             font-size: 18px;
         }
 
@@ -105,29 +82,29 @@
         .field label {
             display: block;
             font-size: 14px;
-            font-weight: 700;
-            margin-bottom: 7px;
+            font-weight: 600;
+            margin: 10px 0 4px;
         }
 
         .field input[type="file"],
         .field input[type="text"] {
             width: 100%;
-            padding: 12px 13px;
-            border: 1px solid #c8d2e2;
-            border-radius: 8px;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
             background: #fff;
             font: inherit;
             color: inherit;
         }
 
         .field input[type="file"] {
-            padding: 10px 12px;
+            padding: 8px;
         }
 
         .field input:focus {
             outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+            border-color: #2a6;
+            box-shadow: 0 0 0 2px rgba(34, 170, 102, 0.15);
         }
 
         .button-row {
@@ -139,41 +116,41 @@
 
         button {
             border: 0;
-            border-radius: 8px;
-            background: var(--accent);
+            border-radius: 4px;
+            background: #2a6;
             color: #fff;
-            padding: 12px 18px;
+            padding: 8px 16px;
             font: inherit;
-            font-weight: 700;
+            font-weight: 600;
             cursor: pointer;
         }
 
         button:hover {
-            background: #2563eb;
+            background: #248f5c;
         }
 
         .hint {
-            color: var(--muted);
-            font-size: 14px;
+            color: #666;
+            font-size: 12px;
         }
 
         .message {
-            border-radius: 8px;
-            padding: 12px 14px;
+            border-radius: 4px;
+            padding: 10px 14px;
             margin-top: 16px;
             font-size: 14px;
         }
 
         .message.error {
-            background: var(--error-soft);
-            color: var(--error);
-            border: 1px solid #f7b4ae;
+            border: 1px solid #e3b3b3;
+            background: #fff2f2;
+            color: #933;
         }
 
         .message.success {
-            background: var(--success-soft);
-            color: var(--success);
-            border: 1px solid #a7e3bf;
+            border: 1px solid #bce;
+            background: #eef7ff;
+            color: #246;
         }
 
         .job-header {
@@ -191,36 +168,36 @@
 
         .job-subtitle {
             margin: 0;
-            color: var(--muted);
-            font-size: 14px;
+            color: #666;
+            font-size: 13px;
         }
 
         .badge {
             display: inline-flex;
             align-items: center;
-            min-height: 32px;
-            padding: 0 12px;
+            min-height: 28px;
+            padding: 0 10px;
             border-radius: 999px;
-            font-size: 13px;
-            font-weight: 700;
-            background: #eef2ff;
-            color: #344054;
+            font-size: 12px;
+            font-weight: 600;
+            background: #f2f2f2;
+            color: #555;
             white-space: nowrap;
         }
 
         .badge.running {
-            background: var(--accent-soft);
-            color: #1d4ed8;
+            background: #eef7ff;
+            color: #26a;
         }
 
         .badge.completed {
-            background: var(--success-soft);
-            color: var(--success);
+            background: #edf8f2;
+            color: #2a6;
         }
 
         .badge.failed {
-            background: var(--error-soft);
-            color: var(--error);
+            background: #fff2f2;
+            color: #c33;
         }
 
         .progress-meta {
@@ -229,13 +206,14 @@
             gap: 12px;
             align-items: center;
             margin-bottom: 8px;
-            font-size: 14px;
+            font-size: 13px;
+            color: #666;
         }
 
         .progress-track {
             width: 100%;
-            height: 12px;
-            background: #e7edf6;
+            height: 10px;
+            background: #ececec;
             border-radius: 999px;
             overflow: hidden;
         }
@@ -243,7 +221,7 @@
         .progress-fill {
             height: 100%;
             width: 0%;
-            background: linear-gradient(90deg, #60a5fa, #2563eb);
+            background: #2a6;
             transition: width 0.3s ease;
         }
 
@@ -255,37 +233,37 @@
         }
 
         .stat {
-            border: 1px solid #e4eaf3;
-            border-radius: 8px;
+            border: 1px solid #eee;
+            border-radius: 4px;
             padding: 12px;
-            background: #fbfcfe;
+            background: #fafafa;
         }
 
         .stat-label {
             display: block;
-            color: var(--muted);
+            color: #666;
             font-size: 12px;
             margin-bottom: 6px;
         }
 
         .stat-value {
             display: block;
-            font-size: 15px;
-            font-weight: 700;
+            font-size: 14px;
+            font-weight: 600;
             word-break: break-word;
         }
 
         .log-box {
-            border: 1px solid #d8e0ec;
-            border-radius: 8px;
-            background: #0f172a;
-            color: #dbe7ff;
-            padding: 14px;
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            color: #222;
+            padding: 8px;
             min-height: 220px;
             max-height: 320px;
-            overflow: auto;
-            font-family: "SFMono-Regular", Consolas, monospace;
-            font-size: 13px;
+            overflow-y: auto;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: 12px;
             line-height: 1.5;
             white-space: pre-wrap;
         }
@@ -293,8 +271,8 @@
         .download-link {
             display: inline-block;
             margin-top: 14px;
-            color: #1d4ed8;
-            font-weight: 700;
+            color: #26a;
+            font-weight: 600;
             text-decoration: none;
         }
 
@@ -303,21 +281,17 @@
         }
 
         @media (max-width: 720px) {
-            .page {
-                padding: 24px 14px 42px;
+            body {
+                margin: 24px auto;
+                padding: 0 14px 24px;
             }
 
             .hero h1 {
                 font-size: 28px;
             }
 
-            .hero {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-
-            .hero-logo img {
-                height: 40px;
+            .hero-logo {
+                justify-content: flex-start;
             }
 
             .job-grid {
@@ -335,12 +309,12 @@
 <body>
     <div class="page">
         <div class="hero">
+            <div class="hero-logo" aria-label="Zibanka logo">
+                <img src="{{ url_for('asset', filename='zibanka_logo.jpeg') }}" alt="Zibanka logo">
+            </div>
             <div class="hero-copy">
                 <h1>SRT Processor</h1>
                 <p>Upload an SRT file, choose the input language, and follow the batch progress live while the output file is prepared.</p>
-            </div>
-            <div class="hero-logo" aria-label="Zibanka logo">
-                <img src="{{ url_for('asset', filename='zibanka_logo.jpeg') }}" alt="Zibanka logo">
             </div>
         </div>
 
@@ -358,9 +332,14 @@
                         <input id="input_language" name="input_language" type="text" placeholder="Kannada" required>
                     </div>
 
+                    <div class="field">
+                        <label for="output_file_name">Output file name</label>
+                        <input id="output_file_name" name="output_file_name" type="text" placeholder="episode_1138_kannada" required>
+                    </div>
+
                     <div class="button-row">
                         <button type="submit">Process</button>
-                        <span class="hint">Large files may take a few minutes because batches are processed one at a time.</span>
+                        <span class="hint">Large files may take a few minutes because batches are processed one at a time. You can enter the name with or without `.srt`.</span>
                     </div>
                 </form>
 
@@ -411,6 +390,10 @@
                         <span class="stat-label">File name</span>
                         <span class="stat-value">{{ active_job.filename }}</span>
                     </div>
+                    <div class="stat">
+                        <span class="stat-label">Output file</span>
+                        <span class="stat-value" id="job-output-file">{{ active_job.output_file_name }}</span>
+                    </div>
                 </div>
 
                 <h2>Processing log</h2>
@@ -447,6 +430,7 @@
             const progressLabelEl = document.getElementById("job-progress-label");
             const progressBarEl = document.getElementById("job-progress-bar");
             const stateEl = document.getElementById("job-state");
+            const outputFileEl = document.getElementById("job-output-file");
             const logsEl = document.getElementById("job-logs");
             const errorEl = document.getElementById("job-error");
             const downloadEl = document.getElementById("job-download");
@@ -456,6 +440,9 @@
                 statusEl.className = "badge " + job.status;
                 messageEl.textContent = job.message || "";
                 stateEl.textContent = job.status.charAt(0).toUpperCase() + job.status.slice(1);
+                if (outputFileEl) {
+                    outputFileEl.textContent = job.output_file_name || "";
+                }
                 progressLabelEl.textContent = `${job.progress}%`;
                 progressBarEl.style.width = `${job.progress}%`;
 

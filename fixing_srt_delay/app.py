@@ -47,12 +47,13 @@ def allowed_file(filename):
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
-def create_job(filename, input_language):
+def create_job(filename, input_language, output_file_name):
     job_id = uuid4().hex
     job = {
         "id": job_id,
         "filename": filename,
         "input_language": input_language,
+        "output_file_name": output_file_name,
         "status": "queued",
         "progress": 0,
         "current_batch": 0,
@@ -105,7 +106,7 @@ def run_job(job_id, upload_path):
         output_path = process_srt_file(
             file_path=upload_path,
             input_language=job["input_language"],
-            output_language=job["output_language"],
+            output_file_name=job["output_file_name"],
             output_dir=OUTPUT_DIR,
             progress_callback=progress_callback
         )
@@ -114,6 +115,7 @@ def run_job(job_id, upload_path):
             job["status"] = "completed"
             job["progress"] = 100
             job["message"] = "Processing complete."
+            job["output_file_name"] = output_path.name
             job["download_name"] = output_path.name
             append_log(job, "Processing complete.")
     except Exception as exc:
@@ -145,7 +147,7 @@ def asset(filename):
 def process():
     uploaded_file = request.files.get("srt_file")
     input_language = request.form.get("input_language", "").strip()
-    output_language = request.form.get("output_language", "").strip()
+    output_file_name = request.form.get("output_file_name", "").strip()
 
     if not uploaded_file or uploaded_file.filename == "":
         return render_template(
@@ -168,11 +170,11 @@ def process():
             form_error="Please enter the input language."
         ), 400
 
-    if not output_language:
+    if not output_file_name:
         return render_template(
             "index.html",
             active_job=None,
-            form_error="Please enter the output language."
+            form_error="Please enter the output file name."
         ), 400
 
     safe_name = secure_filename(uploaded_file.filename)
@@ -183,8 +185,7 @@ def process():
     job = create_job(
         filename=safe_name,
         input_language=input_language,
-        output_language=output_language
-    )
+        output_file_name=output_file_name)
 
     worker = threading.Thread(target=run_job, args=(job["id"], upload_path), daemon=True)
     worker.start()
@@ -211,7 +212,7 @@ def status(job_id):
         "error": job["error"],
         "filename": job["filename"],
         "input_language": job["input_language"],
-        "output_language": job["output_language"],
+        "output_file_name": job["output_file_name"],
         "download_url": url_for("download_file", filename=job["download_name"]) if job["download_name"] else None,
     }
 

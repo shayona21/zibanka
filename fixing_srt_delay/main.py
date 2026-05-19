@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from google import genai
 from google.genai import types
+from werkzeug.utils import secure_filename
 
 #constants 
 MODEL_NAME = "gemini-2.5-flash"
@@ -225,6 +226,18 @@ def emit_progress(progress_callback, current_batch, total_batches, message):
         }
     )
 
+
+def get_output_file_name(file_path, requested_name=None):
+    input_path = Path(file_path)
+
+    if requested_name:
+        requested_stem = Path(requested_name).stem
+        safe_stem = secure_filename(requested_stem)
+        if safe_stem:
+            return f"{safe_stem}.srt"
+
+    return f"{input_path.stem}_processed.srt"
+
 #running transliteration for each 50 row batch in an episode dialogue SRT file
 #%%
 def main(
@@ -298,6 +311,7 @@ def main(
 def process_srt_file(
     file_path,
     input_language,
+    output_file_name=None,
     output_dir="output",
     progress_callback=None
 ):
@@ -314,8 +328,10 @@ def process_srt_file(
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    input_path = Path(file_path)
-    output_filename = f"{input_path.stem}_processed.srt"
+    output_filename = get_output_file_name(
+        file_path=file_path,
+        requested_name=output_file_name
+    )
     output_path = output_dir_path / output_filename
 
     dataframe_to_srt(final_df, output_path)
