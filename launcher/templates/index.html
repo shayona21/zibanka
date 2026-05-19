@@ -22,6 +22,23 @@
             padding: 24px;
         }
 
+        .hero {
+            margin-bottom: 20px;
+        }
+
+        .hero-logo {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 8px;
+        }
+
+        .hero-logo img {
+            max-height: 54px;
+            max-width: 180px;
+            height: auto;
+            width: auto;
+        }
+
         h1 {
             margin: 0 0 8px;
             font-size: 30px;
@@ -54,8 +71,15 @@
 </head>
 <body>
     <div class="panel">
-        <h1>Zibanka Tools</h1>
-        <p>Select a tool below.</p>
+        <div class="hero">
+            <div class="hero-logo" aria-label="Zibanka logo">
+                <img src="{{ url_for('asset', filename='zibanka_logo.jpeg') }}" alt="Zibanka logo">
+            </div>
+            <div class="hero-copy">
+                <h1>Zibanka Tools</h1>
+                <p>Select a tool below.</p>
+            </div>
+        </div>
 
         <ol>
             <li><a href="{{ fixing_srt_delay_url }}">Fixing SRT Delay</a></li>
