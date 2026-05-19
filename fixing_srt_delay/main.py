@@ -25,7 +25,7 @@ def srt_to_dataframe(file_path):
     Multi-line subtitles are preserved using <n>
     """
 
-    with open(file_path, "r", encoding="utf-8") as file:
+    with open(file_path, "r", encoding="utf-8-sig") as file:
         content = file.read()
 
     blocks = content.strip().split("\n\n")
