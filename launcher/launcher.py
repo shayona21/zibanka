@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import os 
 from flask import Flask, render_template, send_from_directory
 
 
@@ -26,4 +26,5 @@ def asset(filename):
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=5050)
+    port = int(os.environ.get("PORT", "5050"))
+    app.run(debug=False, port=port)
