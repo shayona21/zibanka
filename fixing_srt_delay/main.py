@@ -240,12 +240,7 @@ def get_output_file_name(file_path, requested_name=None):
 
 #running transliteration for each 50 row batch in an episode dialogue SRT file
 #%%
-def main(
-    file_path,
-    input_language,
-    batch_size=BATCH_SIZE,
-    progress_callback=None
-):
+def main(file_path,input_language,batch_size=BATCH_SIZE, progress_callback=None):
 
     #converts srt file to dataframe, trims dataframe
     df = srt_to_dataframe(file_path)
@@ -282,10 +277,7 @@ def main(
         response_message = f"Gemini batch {batch_num + 1} response received."
         print(response_message)
 
-        normalized_batch_result = normalize_batch_result(
-            batch_result=batch_result,
-            batch_num=batch_num + 1
-        )
+        normalized_batch_result = normalize_batch_result(batch_result=batch_result,batch_num=batch_num + 1)
 
         all_results.extend(normalized_batch_result)
         emit_progress(progress_callback, batch_num + 1, total_batches, response_message)
@@ -297,24 +289,15 @@ def main(
     gemini_output_df = pd.DataFrame(all_results)
 
     #merges gemini output with original dataframe
-    final_df = df.merge(
-        gemini_output_df[["index", "translit_dialogue"]],
-        on="index",
-        how="left"
-    )
+    final_df = df.merge(gemini_output_df[["index", "translit_dialogue"]],on="index",how="left")
 
     emit_progress(progress_callback, total_batches, total_batches, "Merging batch results.")
 
     return gemini_output_df, final_df
 
 
-def process_srt_file(
-    file_path,
-    input_language,
-    output_file_name=None,
-    output_dir="output",
-    progress_callback=None
-):
+def process_srt_file(file_path, input_language,
+            batch_size=BATCH_SIZE, output_file_name=None, output_dir="output", progress_callback=None):
     """
     Run transliteration for an SRT file and write the processed SRT to disk.
     """
@@ -322,16 +305,16 @@ def process_srt_file(
     _, final_df = main(
         file_path=file_path,
         input_language=input_language,
-        progress_callback=progress_callback
-    )
+        batch_size=batch_size,
+        progress_callback=progress_callback)
 
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     output_filename = get_output_file_name(
         file_path=file_path,
-        requested_name=output_file_name
-    )
+        requested_name=output_file_name)
+    
     output_path = output_dir_path / output_filename
 
     dataframe_to_srt(final_df, output_path)
@@ -365,3 +348,5 @@ def dataframe_to_srt(final_df, output_path):
         file.write(srt_content)
 
     print(f"SRT file saved to: {output_path}")
+
+# %%

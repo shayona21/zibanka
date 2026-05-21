@@ -47,13 +47,14 @@ def allowed_file(filename):
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
-def create_job(filename, input_language, output_file_name):
+def create_job(filename, input_language, output_file_name, batch_size):
     job_id = uuid4().hex
     job = {
         "id": job_id,
         "filename": filename,
         "input_language": input_language,
         "output_file_name": output_file_name,
+        "batch_size": batch_size,
         "status": "queued",
         "progress": 0,
         "current_batch": 0,
@@ -106,6 +107,7 @@ def run_job(job_id, upload_path):
         output_path = process_srt_file(
             file_path=upload_path,
             input_language=job["input_language"],
+            batch_size=job["batch_size"],
             output_file_name=job["output_file_name"],
             output_dir=OUTPUT_DIR,
             progress_callback=progress_callback
@@ -148,6 +150,7 @@ def process():
     uploaded_file = request.files.get("srt_file")
     input_language = request.form.get("input_language", "").strip()
     output_file_name = request.form.get("output_file_name", "").strip()
+    batch_size_raw = request.form.get("batch_size", "").strip()
 
     if not uploaded_file or uploaded_file.filename == "":
         return render_template(
@@ -177,6 +180,29 @@ def process():
             form_error="Please enter the output file name."
         ), 400
 
+    if not batch_size_raw:
+        return render_template(
+            "index.html",
+            active_job=None,
+            form_error="Please enter a batch size between 1 and 100."
+        ), 400
+
+    try:
+        batch_size = int(batch_size_raw)
+    except ValueError:
+        return render_template(
+            "index.html",
+            active_job=None,
+            form_error="Batch size must be a whole number between 1 and 100."
+        ), 400
+
+    if batch_size < 1 or batch_size > 100:
+        return render_template(
+            "index.html",
+            active_job=None,
+            form_error="Batch size must be between 1 and 100."
+        ), 400
+
     safe_name = secure_filename(uploaded_file.filename)
     unique_name = f"{uuid4().hex}_{safe_name}"
     upload_path = UPLOAD_DIR / unique_name
@@ -185,7 +211,8 @@ def process():
     job = create_job(
         filename=safe_name,
         input_language=input_language,
-        output_file_name=output_file_name)
+        output_file_name=output_file_name,
+        batch_size=batch_size)
 
     worker = threading.Thread(target=run_job, args=(job["id"], upload_path), daemon=True)
     worker.start()
@@ -213,6 +240,7 @@ def status(job_id):
         "filename": job["filename"],
         "input_language": job["input_language"],
         "output_file_name": job["output_file_name"],
+        "batch_size": job["batch_size"],
         "download_url": url_for("download_file", filename=job["download_name"]) if job["download_name"] else None,
     }
 

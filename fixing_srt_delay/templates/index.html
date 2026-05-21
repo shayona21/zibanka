@@ -337,9 +337,14 @@
                         <input id="output_file_name" name="output_file_name" type="text" placeholder="episode_1138_kannada" required>
                     </div>
 
+                    <div class="field">
+                        <label for="batch_size">Batch size</label>
+                        <input id="batch_size" name="batch_size" type="number" min="1" max="100" step="1" value="50" required>
+                    </div>
+
                     <div class="button-row">
                         <button type="submit">Process</button>
-                        <span class="hint">Large files may take a few minutes because batches are processed one at a time. You can enter the name with or without `.srt`.</span>
+                        <span class="hint">Large files may take a few minutes because batches are processed one at a time. You can enter the name with or without `.srt`. Batch size must be between 1 and 100.</span>
                     </div>
                 </form>
 
@@ -394,6 +399,10 @@
                         <span class="stat-label">Output file</span>
                         <span class="stat-value" id="job-output-file">{{ active_job.output_file_name }}</span>
                     </div>
+                    <div class="stat">
+                        <span class="stat-label">Batch size</span>
+                        <span class="stat-value" id="job-batch-size">{{ active_job.batch_size }}</span>
+                    </div>
                 </div>
 
                 <h2>Processing log</h2>
@@ -431,6 +440,7 @@
             const progressBarEl = document.getElementById("job-progress-bar");
             const stateEl = document.getElementById("job-state");
             const outputFileEl = document.getElementById("job-output-file");
+            const batchSizeEl = document.getElementById("job-batch-size");
             const logsEl = document.getElementById("job-logs");
             const errorEl = document.getElementById("job-error");
             const downloadEl = document.getElementById("job-download");
@@ -442,6 +452,9 @@
                 stateEl.textContent = job.status.charAt(0).toUpperCase() + job.status.slice(1);
                 if (outputFileEl) {
                     outputFileEl.textContent = job.output_file_name || "";
+                }
+                if (batchSizeEl) {
+                    batchSizeEl.textContent = job.batch_size || "";
                 }
                 progressLabelEl.textContent = `${job.progress}%`;
                 progressBarEl.style.width = `${job.progress}%`;
