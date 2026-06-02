@@ -185,7 +185,7 @@
     <img src="{{ url_for('static', filename='zibanka_logo.jpeg') }}" alt="Company logo">
   </div>
   <h1>Video Transcriber</h1>
-  <p class="subtitle">Add up to {{ max_links }} public Google Drive video links. Each row takes one link, an optional title (used to name the output files), and an optional context box. Do not close this terminal while a batch is running.</p>
+  <p class="subtitle">Add up to {{ max_links }} public Google Drive video links. Each video is automatically split into 5-minute batches with a 15-second overlap, then Gemini transcribes each batch and the results are joined into one final transcript. Do not close this terminal while a batch is running.</p>
 </div>
 <div class="header-spacer"></div>
 
@@ -215,7 +215,7 @@
         <input type="text" name="start_{{ slot }}" placeholder="mm:ss" maxlength="7" class="time-input">
         <span>to</span>
         <input type="text" name="end_{{ slot }}" placeholder="mm:ss" maxlength="7" class="time-input">
-        <span class="hint" style="margin-left:6px;">leave both blank to transcribe the full file</span>
+        <span class="hint" style="margin-left:6px;">leave both blank to transcribe the full file; batching still happens automatically inside that range</span>
       </div>
       <div class="context-row">
         <label for="context_{{ slot }}">Video context (optional)</label>
@@ -223,7 +223,7 @@
       </div>
     </div>
     {% endfor %}
-    <div class="hint" style="margin-top:12px;">Leave a row blank to skip it. If you don't enter a title, the file will be named generically (video1, video2, video3).</div>
+    <div class="hint" style="margin-top:12px;">Leave a row blank to skip it. If you don't enter a title, the file will be named generically (video1, video2, video3). Automatic batching uses 5:00 chunks with a 0:15 overlap to reduce skipped or cut dialogue.</div>
 
     <div class="row">
       <div>
@@ -304,6 +304,11 @@
         </td>
         <td>
           <span class="status-{{ v.status }}">{{ v.step }}</span>
+          {% if v.segment_count %}
+            <div style="font-size:12px; color:#555; margin-top:4px;">
+              Segments: {{ v.current_segment if v.current_segment else 0 }}/{{ v.segment_count }}
+            </div>
+          {% endif %}
           {% if v.status == "failed" and v.error %}
             <div class="error-cell">{{ v.error }}</div>
           {% endif %}
