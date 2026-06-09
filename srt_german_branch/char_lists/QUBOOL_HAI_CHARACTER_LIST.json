@@ -1,0 +1,82 @@
+[
+  {
+    "NAME": "Zoya Farooqui",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Ghafoor's daughter; Humaira's half-sister;"
+  },
+  {
+    "NAME": "Asad Ahmed Khan",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Rashid and Dilshad's son"
+  },
+  {
+    "NAME": "Sanam",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Seher's twin sister"
+  },
+  {
+    "NAME": "Seher",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Sanam's twin sister"
+  },
+  {
+    "NAME": "Mahira",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Reborn Sanam"
+  },
+  {
+    "NAME": "Ayan Ahmed Khan",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Rashid and Shireen's son"
+  },
+  {
+    "NAME": "Humeira Siddiqui Sheikh",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Razia and Ghafoor's daughter; Zoya's half-sister;"
+  },
+  {
+    "NAME": "Haider Sheikh",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Zoya's cousin"
+  },
+  {
+    "NAME": "Tanveer Baig/ Begum Sahiba",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Main Antagonist"
+  },
+  {
+    "NAME": "Razia Ahmed Siddiqui",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Ghafoor's wife, Humeira's mother"
+  },
+  {
+    "NAME": "Dilshad Ahmed Khan",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Rashid's ex-wife"
+  },
+  {
+    "NAME": "Rashid Ahmed Khan",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Dilshad's ex-husband, Shireen's husband"
+  },
+  {
+    "NAME": "Shireen",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Rashid's wife, Ayan, Nikhat and Nuzhat's mother"
+  },
+  {
+    "NAME": "Nikhat",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Rashid and Shireen's daughter"
+  },
+  {
+    "NAME": "Nuhat",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Rashid and Shireen's daughter"
+  },
+  {
+    "NAME": "Ghafoor Ahmed Siddiqui",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Shireen's foster brother"
+  }
+]

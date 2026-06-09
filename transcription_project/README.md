@@ -62,7 +62,7 @@ For each video in the batch, sequentially:
 3. Render each segment to its own temporary video file with FFmpeg
 4. Upload each segment to the Gemini Files API
 5. Wait until Gemini marks the uploaded segment as `ACTIVE`
-6. Call `gemini-2.5-pro` with the same transcription prompt for every segment
+6. Call `gemini-2.5-flash` with the same transcription prompt for every segment
 7. Shift each segment transcript back onto the original video timeline
 8. Join all segment transcripts into one final CSV and one XLSX in `./outputs/`
 9. Delete temporary local video files and uploaded Gemini files

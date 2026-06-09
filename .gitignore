@@ -25,3 +25,7 @@ ENV/
 
 # Local app runtime artifacts
 fixing_srt_delay/uploads/
+
+hot_folder/orchestrator/hot-folder-transcription-c5a0d168400d.json
+hot_folder/orchestrator/processed_ids.json
+fixing_srt_delay/output/

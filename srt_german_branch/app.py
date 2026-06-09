@@ -6,24 +6,20 @@ from uuid import uuid4
 from flask import Flask, jsonify, render_template, request, send_file, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
-from main import process_srt_file
+from main import CHARACTER_LIST_OPTIONS, SERIES_PROMPTS, get_character_reference_path, process_srt_file
 
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "output"
 ALLOWED_EXTENSIONS = {".srt"}
-SUPPORTED_INPUT_LANGUAGES = [
-    "Hindi",
-    "Bengali",
-    "Telugu",
-    "Marathi",
-    "Tamil",
-    "Urdu",
-    "Gujarati",
-    "Kannada",
-    "Malayalam",
-    "Odia (Oriya)",
+SUPPORTED_SERIES = [
+    {"key": series_key, "label": config["label"]}
+    for series_key, config in SERIES_PROMPTS.items()
+]
+SUPPORTED_CHARACTER_LISTS = [
+    {"key": option_key, "label": option["label"]}
+    for option_key, option in CHARACTER_LIST_OPTIONS.items()
 ]
 
 
@@ -59,12 +55,16 @@ def allowed_file(filename):
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
-def create_job(files, input_language, batch_size):
+def create_job(files, series_key, batch_size, character_reference_key="none", character_reference_name=None, character_reference_path=None):
     job_id = uuid4().hex
     job = {
         "id": job_id,
         "title": f"{len(files)} file{'s' if len(files) != 1 else ''} queued",
-        "input_language": input_language,
+        "series_key": series_key,
+        "series_label": SERIES_PROMPTS[series_key]["label"],
+        "character_reference_key": character_reference_key,
+        "character_reference_name": character_reference_name,
+        "character_reference_path": character_reference_path,
         "files": files,
         "current_file_number": 0,
         "total_files": len(files),
@@ -154,10 +154,11 @@ def run_job(job_id):
 
             output_path = process_srt_file(
                 file_path=file_job["upload_path"],
-                input_language=job["input_language"],
+                series_key=job["series_key"],
                 batch_size=job["batch_size"],
                 output_file_name=file_job["requested_output_file_name"],
                 output_dir=OUTPUT_DIR,
+                character_reference_path=job["character_reference_path"],
                 progress_callback=progress_callback,
             )
 
@@ -211,7 +212,8 @@ def index():
     return render_template(
         "index.html",
         active_job=active_job,
-        input_languages=SUPPORTED_INPUT_LANGUAGES,
+        series_options=SUPPORTED_SERIES,
+        character_list_options=SUPPORTED_CHARACTER_LISTS,
     )
 
 
@@ -222,8 +224,9 @@ def asset(filename):
 
 @app.route("/process", methods=["POST"])
 def process():
-    input_language = request.form.get("input_language", "").strip()
+    series_key = request.form.get("series_key", "").strip()
     batch_size_raw = request.form.get("batch_size", "").strip()
+    character_reference_key = request.form.get("character_reference_key", "none").strip() or "none"
     pending_files = []
 
     for index in range(1, 4):
@@ -241,7 +244,7 @@ def process():
                 "index.html",
                 active_job=None,
                 form_error=f"File {index} must be an .srt file.",
-                input_languages=SUPPORTED_INPUT_LANGUAGES,
+                series_options=SUPPORTED_SERIES,
             ), 400
 
         if has_file and not has_output_name:
@@ -249,7 +252,7 @@ def process():
                 "index.html",
                 active_job=None,
                 form_error=f"Please enter an output file name for file {index}.",
-                input_languages=SUPPORTED_INPUT_LANGUAGES,
+                series_options=SUPPORTED_SERIES,
             ), 400
 
         if has_output_name and not has_file:
@@ -257,7 +260,7 @@ def process():
                 "index.html",
                 active_job=None,
                 form_error=f"Please upload an SRT file for file {index}.",
-                input_languages=SUPPORTED_INPUT_LANGUAGES,
+                series_options=SUPPORTED_SERIES,
             ), 400
 
         pending_files.append(
@@ -272,31 +275,47 @@ def process():
             "index.html",
             active_job=None,
             form_error="Please upload at least one SRT file.",
-            input_languages=SUPPORTED_INPUT_LANGUAGES,
+            series_options=SUPPORTED_SERIES,
+            character_list_options=SUPPORTED_CHARACTER_LISTS,
         ), 400
 
-    if not input_language:
+    if not series_key:
         return render_template(
             "index.html",
             active_job=None,
-            form_error="Please select the input language.",
-            input_languages=SUPPORTED_INPUT_LANGUAGES,
+            form_error="Please select the subtitle project.",
+            series_options=SUPPORTED_SERIES,
+            character_list_options=SUPPORTED_CHARACTER_LISTS,
         ), 400
 
-    if input_language not in SUPPORTED_INPUT_LANGUAGES:
+    if series_key not in SERIES_PROMPTS:
         return render_template(
             "index.html",
             active_job=None,
-            form_error="Please select a valid input language.",
-            input_languages=SUPPORTED_INPUT_LANGUAGES,
+            form_error="Please select a valid subtitle project.",
+            series_options=SUPPORTED_SERIES,
+            character_list_options=SUPPORTED_CHARACTER_LISTS,
         ), 400
+
+    if character_reference_key not in CHARACTER_LIST_OPTIONS:
+        return render_template(
+            "index.html",
+            active_job=None,
+            form_error="Please select a valid character list.",
+            series_options=SUPPORTED_SERIES,
+            character_list_options=SUPPORTED_CHARACTER_LISTS,
+        ), 400
+
+    character_reference_path = get_character_reference_path(character_reference_key)
+    character_reference_name = CHARACTER_LIST_OPTIONS[character_reference_key]["label"]
 
     if not batch_size_raw:
         return render_template(
             "index.html",
             active_job=None,
             form_error="Please enter a batch size between 1 and 100.",
-            input_languages=SUPPORTED_INPUT_LANGUAGES,
+            series_options=SUPPORTED_SERIES,
+            character_list_options=SUPPORTED_CHARACTER_LISTS,
         ), 400
 
     try:
@@ -306,7 +325,8 @@ def process():
             "index.html",
             active_job=None,
             form_error="Batch size must be a whole number between 1 and 100.",
-            input_languages=SUPPORTED_INPUT_LANGUAGES,
+            series_options=SUPPORTED_SERIES,
+            character_list_options=SUPPORTED_CHARACTER_LISTS,
         ), 400
 
     if batch_size < 1 or batch_size > 100:
@@ -314,7 +334,8 @@ def process():
             "index.html",
             active_job=None,
             form_error="Batch size must be between 1 and 100.",
-            input_languages=SUPPORTED_INPUT_LANGUAGES,
+            series_options=SUPPORTED_SERIES,
+            character_list_options=SUPPORTED_CHARACTER_LISTS,
         ), 400
 
     file_entries = []
@@ -337,8 +358,11 @@ def process():
 
     job = create_job(
         files=file_entries,
-        input_language=input_language,
+        series_key=series_key,
         batch_size=batch_size,
+        character_reference_key=character_reference_key,
+        character_reference_name=character_reference_name,
+        character_reference_path=str(character_reference_path) if character_reference_path else None,
     )
 
     worker = threading.Thread(target=run_job, args=(job["id"],), daemon=True)
@@ -348,7 +372,8 @@ def process():
         "index.html",
         active_job=job,
         started=True,
-        input_languages=SUPPORTED_INPUT_LANGUAGES,
+        series_options=SUPPORTED_SERIES,
+        character_list_options=SUPPORTED_CHARACTER_LISTS,
     )
 
 
@@ -370,7 +395,10 @@ def status(job_id):
         "message": job["message"],
         "logs": job["logs"],
         "error": job["error"],
-        "input_language": job["input_language"],
+        "series_key": job["series_key"],
+        "series_label": job["series_label"],
+        "character_reference_key": job["character_reference_key"],
+        "character_reference_name": job["character_reference_name"],
         "files": [
             {
                 "filename": file_job["filename"],
@@ -406,5 +434,5 @@ def download_file(filename):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5001"))
+    port = int(os.environ.get("PORT", "5003"))
     app.run(debug=False, port=port)

@@ -1,0 +1,57 @@
+[
+  {
+    "NAME": "Samrat Rathore",
+    "GENDER": "MALE",
+    "DESCRIPTION": "A businessman/ Urmi's husband/ Shashikala's son"
+  },
+  {
+    "NAME": "Urmi Devi Singh",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Samrat's wife/ Anushka's sister"
+  },
+  {
+    "NAME": "Ishaan Sinha",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Samrat's childhood friend & advisor"
+  },
+  {
+    "NAME": "Sushma Tiwari",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Urmi's mom/ Darshan's wife"
+  },
+  {
+    "NAME": "Darshan Tiwari",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Urmi's dad/ Sushma's husband"
+  },
+  {
+    "NAME": "Shashikala Rathore",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Samrat's mom/ Urmi's mother-in-law"
+  },
+  {
+    "NAME": "Diwakar Rathore",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Samrat's cousin"
+  },
+  {
+    "NAME": "Garjan Rathore",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Samrat's cousin"
+  },
+  {
+    "NAME": "Rashmi Singh",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Samrat's sister"
+  },
+  {
+    "NAME": "Ravi Tiwari",
+    "GENDER": "MALE",
+    "DESCRIPTION": "Urmi's brother"
+  },
+  {
+    "NAME": "Anushka Tiwari",
+    "GENDER": "FEMALE",
+    "DESCRIPTION": "Urmi's sister"
+  }
+]

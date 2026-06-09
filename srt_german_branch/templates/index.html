@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SRT Processor</title>
+    <title>German SRT Translator</title>
     <style>
         html { background-color: #f7f7f7; }
 
@@ -362,8 +362,8 @@
                 <img src="{{ url_for('asset', filename='zibanka_logo.jpeg') }}" alt="Zibanka logo">
             </div>
             <div class="hero-copy">
-                <h1>SRT Processor</h1>
-                <p>Upload an SRT file, choose the input language, and follow the batch progress live while the output file is prepared.</p>
+                <h1>German SRT Translator</h1>
+                <p>Upload up to 3 English SRT files, choose the subtitle project prompt, select the matching built-in character list, and follow the batch progress live while the German output files are prepared.</p>
             </div>
         </div>
 
@@ -372,11 +372,20 @@
                 <h2>Start a new job</h2>
                 <form method="post" action="{{ url_for('process') }}" enctype="multipart/form-data">
                     <div class="field">
-                        <label for="input_language">Input language</label>
-                        <select id="input_language" name="input_language" required>
-                            <option value="" selected disabled>Select a language</option>
-                            {% for language in input_languages %}
-                            <option value="{{ language }}">{{ language }}</option>
+                        <label for="series_key">Subtitle project</label>
+                        <select id="series_key" name="series_key" required>
+                            <option value="" selected disabled>Select a project</option>
+                            {% for series in series_options %}
+                            <option value="{{ series.key }}">{{ series.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label for="character_reference_key">Character list</label>
+                        <select id="character_reference_key" name="character_reference_key">
+                            {% for character_list in character_list_options %}
+                            <option value="{{ character_list.key }}">{{ character_list.label }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -394,7 +403,7 @@
                                     id="output_file_name_{{ index }}"
                                     name="output_file_name_{{ index }}"
                                     type="text"
-                                    placeholder="episode_{{ index }}_kannada"
+                                    placeholder="episode_{{ index }}_german"
                                 >
                             </div>
                         </div>
@@ -408,9 +417,30 @@
 
                     <div class="button-row">
                         <button type="submit">Process</button>
-                        <span class="hint">Upload up to 3 SRT files. Each uploaded file needs its own output file name. Files are processed one after another, and you can enter each name with or without `.srt`. Batch size must be between 1 and 100.</span>
+                        <span class="hint">Upload up to 3 SRT files. Each file needs its own output file name. All files in one run will use the same subtitle project prompt and selected built-in character list. Batch size must be between 1 and 100.</span>
                     </div>
                 </form>
+
+                <script>
+                    (function () {
+                        const seriesSelect = document.getElementById("series_key");
+                        const characterListSelect = document.getElementById("character_reference_key");
+                        if (!seriesSelect || !characterListSelect) return;
+
+                        function syncCharacterListToSeries() {
+                            const selectedSeries = seriesSelect.value;
+                            if (!selectedSeries) return;
+
+                            const matchingOption = Array.from(characterListSelect.options).find((option) => option.value === selectedSeries);
+                            if (matchingOption) {
+                                characterListSelect.value = selectedSeries;
+                            }
+                        }
+
+                        seriesSelect.addEventListener("change", syncCharacterListToSeries);
+                        syncCharacterListToSeries();
+                    }());
+                </script>
 
                 {% if form_error %}
                 <div class="message error">{{ form_error }}</div>
@@ -455,8 +485,8 @@
 
                 <div class="job-grid">
                     <div class="stat">
-                        <span class="stat-label">Input language</span>
-                        <span class="stat-value" id="job-input-language">{{ active_job.input_language }}</span>
+                        <span class="stat-label">Subtitle project</span>
+                        <span class="stat-value" id="job-series-label">{{ active_job.series_label }}</span>
                     </div>
                     <div class="stat">
                         <span class="stat-label">Current state</span>
@@ -477,6 +507,10 @@
                     <div class="stat">
                         <span class="stat-label">Total files</span>
                         <span class="stat-value" id="job-total-files">{{ active_job.total_files }}</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Character list</span>
+                        <span class="stat-value" id="job-character-reference">{{ active_job.character_reference_name or "None" }}</span>
                     </div>
                 </div>
 
@@ -522,10 +556,12 @@
             const batchesEl = document.getElementById("job-batches");
             const progressLabelEl = document.getElementById("job-progress-label");
             const progressBarEl = document.getElementById("job-progress-bar");
+            const seriesLabelEl = document.getElementById("job-series-label");
             const stateEl = document.getElementById("job-state");
             const currentFileEl = document.getElementById("job-current-file");
             const outputFileEl = document.getElementById("job-output-file");
             const batchSizeEl = document.getElementById("job-batch-size");
+            const characterReferenceEl = document.getElementById("job-character-reference");
             const logsEl = document.getElementById("job-logs");
             const errorEl = document.getElementById("job-error");
             const filesEl = document.getElementById("job-files");
@@ -540,10 +576,13 @@
             }
 
             function renderJob(job) {
-                titleEl.textContent = job.current_file_name || job.title || "SRT Processor";
+                titleEl.textContent = job.current_file_name || job.title || "German SRT Translator";
                 statusEl.textContent = job.status.charAt(0).toUpperCase() + job.status.slice(1);
                 statusEl.className = "badge " + job.status;
                 messageEl.textContent = job.message || "";
+                if (seriesLabelEl) {
+                    seriesLabelEl.textContent = job.series_label || "";
+                }
                 stateEl.textContent = job.status.charAt(0).toUpperCase() + job.status.slice(1);
                 if (currentFileEl) {
                     currentFileEl.textContent = job.current_file_name || "Waiting to start";
@@ -553,6 +592,9 @@
                 }
                 if (batchSizeEl) {
                     batchSizeEl.textContent = job.batch_size || "";
+                }
+                if (characterReferenceEl) {
+                    characterReferenceEl.textContent = job.character_reference_name || "None";
                 }
                 progressLabelEl.textContent = `${job.progress}%`;
                 progressBarEl.style.width = `${job.progress}%`;

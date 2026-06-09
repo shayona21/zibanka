@@ -25,7 +25,7 @@ from google import genai
 from google.genai import errors as genai_errors
 
 
-MODEL_NAME = "gemini-2.5-pro"
+MODEL_NAME = "gemini-2.5-flash" #change to flash
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 10  # doubled each retry
 
