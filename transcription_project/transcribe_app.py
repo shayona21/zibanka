@@ -2,15 +2,13 @@
 Flask web server for the video transcription tool.
 
 Run with:
-    python app.py
+    python transcribe_app.py
 
-Then open http://localhost:5000 in your browser.
+Then open http://127.0.0.1:5001 in your browser.
 """
 
 import os
 import re
-import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -43,9 +41,6 @@ SUPPORTED_LANGUAGES = [
 ]
 
 MAX_LINKS_PER_BATCH = 3
-SEGMENT_LENGTH_SECONDS = 5 * 60
-SEGMENT_OVERLAP_SECONDS = 15
-PAL_FRAME_RATE = 25
 
 app = Flask(__name__)
 
@@ -263,163 +258,6 @@ def write_xlsx_from_csv(csv_text: str, filename: str) -> Path:
     return path
 
 
-def ensure_ffmpeg_tools():
-    missing = [
-        tool_name
-        for tool_name in ("ffmpeg", "ffprobe")
-        if shutil.which(tool_name) is None
-    ]
-    if missing:
-        raise RuntimeError(
-            "Missing required video tools: "
-            + ", ".join(missing)
-            + ". Install FFmpeg so the app can split videos into 5-minute batches."
-        )
-
-
-def get_video_duration_seconds(video_path: Path) -> int:
-    ensure_ffmpeg_tools()
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(video_path),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    duration_text = result.stdout.strip()
-    if not duration_text:
-        raise RuntimeError(f"Could not determine video duration for {video_path.name}.")
-    return max(1, int(float(duration_text)))
-
-
-def build_segment_ranges(start_sec: int, end_sec: int) -> list[tuple[int, int]]:
-    ranges = []
-    cursor = start_sec
-    while cursor < end_sec:
-        segment_start = cursor
-        segment_end = min(cursor + SEGMENT_LENGTH_SECONDS + SEGMENT_OVERLAP_SECONDS, end_sec)
-        ranges.append((segment_start, segment_end))
-        cursor += SEGMENT_LENGTH_SECONDS
-    return ranges
-
-
-def extract_video_segment(
-    source_path: Path,
-    output_path: Path,
-    start_sec: int,
-    end_sec: int,
-    log,
-):
-    ensure_ffmpeg_tools()
-    duration = end_sec - start_sec
-    if duration <= 0:
-        raise RuntimeError(
-            f"Invalid segment range for {source_path.name}: {start_sec}s to {end_sec}s."
-        )
-
-    log(
-        f"Creating segment {format_mmss(start_sec)}-{format_mmss(end_sec)} "
-        f"({duration}s) with FFmpeg..."
-    )
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            str(start_sec),
-            "-i",
-            str(source_path),
-            "-t",
-            str(duration),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "23",
-            "-c:a",
-            "aac",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-
-def shift_pal_timestamp(timestamp_text: str, offset_seconds: int) -> str:
-    match = re.fullmatch(r"(\d+):(\d{2}):(\d{2}):(\d{2})", (timestamp_text or "").strip())
-    if not match:
-        raise ValueError(f"Invalid PAL timestamp: {timestamp_text!r}")
-
-    hours, minutes, seconds, frames = map(int, match.groups())
-    total_frames = (
-        (((hours * 60) + minutes) * 60 + seconds) * PAL_FRAME_RATE
-        + frames
-        + (offset_seconds * PAL_FRAME_RATE)
-    )
-
-    shifted_seconds, shifted_frames = divmod(total_frames, PAL_FRAME_RATE)
-    shifted_hours, remainder = divmod(shifted_seconds, 3600)
-    shifted_minutes, shifted_seconds = divmod(remainder, 60)
-    return f"{shifted_hours:02d}:{shifted_minutes:02d}:{shifted_seconds:02d}:{shifted_frames:02d}"
-
-
-def shift_transcript_timestamps(csv_text: str, offset_seconds: int) -> str:
-    if offset_seconds == 0:
-        return csv_text
-
-    lines = csv_text.splitlines()
-    if not lines:
-        return csv_text
-
-    shifted_lines = [lines[0]]
-    for line in lines[1:]:
-        if not line.strip():
-            continue
-        parts = line.split("|")
-        if len(parts) < 2:
-            shifted_lines.append(line)
-            continue
-        parts[0] = shift_pal_timestamp(parts[0], offset_seconds)
-        parts[1] = shift_pal_timestamp(parts[1], offset_seconds)
-        shifted_lines.append("|".join(parts))
-
-    result = "\n".join(shifted_lines)
-    if csv_text.endswith("\n"):
-        result += "\n"
-    return result
-
-
-def merge_transcript_segments(segment_csv_texts: list[str]) -> str:
-    merged_lines = []
-    header_line = None
-
-    for csv_text in segment_csv_texts:
-        lines = [line for line in csv_text.splitlines() if line.strip()]
-        if not lines:
-            continue
-        if header_line is None:
-            header_line = lines[0]
-            merged_lines.append(header_line)
-        merged_lines.extend(lines[1:])
-
-    if not merged_lines:
-        raise RuntimeError("No transcript content was returned from any segment.")
-
-    return "\n".join(merged_lines) + "\n"
-
-
 # -------------------------------------------------------------------
 # Downloads folder cleanup
 # -------------------------------------------------------------------
@@ -493,7 +331,143 @@ def cleanup_downloads(force: bool = False) -> dict:
     }
 
 
-def process_video_job(video: dict, source_lang: str, target_lang: str, prompt: str, batch_id: str):
+# -------------------------------------------------------------------
+# Background worker
+# -------------------------------------------------------------------
+def run_batch(batch_id: str):
+    """Process all videos in the current batch sequentially."""
+    global BATCH
+
+    with BATCH_LOCK:
+        if not BATCH or BATCH["id"] != batch_id:
+            return
+        videos = BATCH["videos"]
+        source_lang = BATCH["source_language"]
+        target_lang = BATCH.get("target_language", "")
+        prompt = BATCH["prompt"]
+
+    for video in videos:
+        idx = video["index"]
+
+        def log(msg: str, v=video):
+            stamp = datetime.now().strftime("%H:%M:%S")
+            line = f"[{stamp}] {msg}"
+            with BATCH_LOCK:
+                v["log"].append(line)
+                # Keep log bounded so the UI doesn't get huge.
+                if len(v["log"]) > 200:
+                    v["log"] = v["log"][-200:]
+
+        with BATCH_LOCK:
+            video["status"] = "running"
+            video["step"] = "Downloading"
+            video["started_at"] = datetime.now().isoformat(timespec="seconds")
+
+        start_time = time.time()
+        local_video_path: Path | None = None
+        segment_video_path: Path | None = None
+
+        try:
+            # Step 1: Download from Drive
+            tmp_name = f"batch_{batch_id}_video_{idx}.mp4"
+            tmp_path = DOWNLOADS_DIR / tmp_name
+            local_video_path = download_drive_video(video["link"], tmp_path, log)
+
+            # Step 2: Transcribe (with optional segment range passed in the prompt)
+            with BATCH_LOCK:
+                video["step"] = "Transcribing"
+            start_sec = video.get("segment_start")
+            end_sec = video.get("segment_end")
+            transcript = transcribe.transcribe_video(
+                str(local_video_path),
+                source_language=source_lang,
+                video_title=video.get("title", ""),
+                video_context=video.get("context", ""),
+                target_language=target_lang,
+                start_time=format_mmss(start_sec),
+                end_time=format_mmss(end_sec),
+                prompt=prompt,
+                log_callback=log,
+            )
+            transcript_filename = f"{filename_prefix(video)}_{safe_slug(source_lang)}_transcript.csv"
+            write_output_file(transcript, transcript_filename)
+            with BATCH_LOCK:
+                video["transcript_file"] = transcript_filename
+            log(f"Transcript saved: {transcript_filename} ({len(transcript)} chars)")
+
+            # Also write an .xlsx version so users can open it directly in
+            # Google Sheets without specifying a delimiter.
+            try:
+                xlsx_filename = f"{filename_prefix(video)}_{safe_slug(source_lang)}_transcript.xlsx"
+                write_xlsx_from_csv(transcript, xlsx_filename)
+                with BATCH_LOCK:
+                    video["transcript_xlsx_file"] = xlsx_filename
+                log(f"XLSX saved: {xlsx_filename}")
+            except Exception as e:
+                # XLSX generation is a convenience; never fail the job over it.
+                log(f"Warning: could not generate XLSX: {e}")
+
+            # Sanity check: flag suspiciously short transcripts. The CSV format
+            # is much longer than the previous plain-text format, so the
+            # threshold is higher here than it was before.
+            if len(transcript) < 2000:
+                log(
+                    "WARNING: transcript is under 2000 characters, which is short for "
+                    "a 20-25 minute episode. You may want to retry."
+                )
+
+            # NOTE: Translation step intentionally removed. translate_text() in
+            # transcribe.py is preserved as dead code for future re-enablement.
+
+            # Success: clean up the local video files (full download + segment).
+            try:
+                if local_video_path and local_video_path.exists():
+                    local_video_path.unlink()
+                    log("Cleaned up local video file.")
+            except Exception as e:
+                log(f"Warning: could not delete local video file: {e}")
+            try:
+                if segment_video_path and segment_video_path.exists():
+                    segment_video_path.unlink()
+                    log("Cleaned up local segment file.")
+            except Exception as e:
+                log(f"Warning: could not delete local segment file: {e}")
+
+            with BATCH_LOCK:
+                video["status"] = "done"
+                video["step"] = "Done"
+                video["finished_at"] = datetime.now().isoformat(timespec="seconds")
+                video["elapsed_seconds"] = int(time.time() - start_time)
+
+        except Exception as e:
+            log(f"ERROR: {e}")
+            with BATCH_LOCK:
+                video["status"] = "failed"
+                video["step"] = "Failed"
+                video["error"] = str(e)
+                video["finished_at"] = datetime.now().isoformat(timespec="seconds")
+                video["elapsed_seconds"] = int(time.time() - start_time)
+            # We keep the downloaded video on failure so the user can retry
+            # without re-downloading. It will be overwritten on retry.
+            # Continue with the next video.
+
+    with BATCH_LOCK:
+        if BATCH and BATCH["id"] == batch_id:
+            BATCH["status"] = "done"
+            BATCH["finished_at"] = datetime.now().isoformat(timespec="seconds")
+
+    # Auto-cleanup: any download files still sitting around that belong to
+    # DONE videos (not failed ones that might be retried) should go.
+    # The per-video success path already deletes its own file, so this is
+    # a belt-and-braces sweep for anything the success path missed (e.g. crash).
+    try:
+        cleanup_downloads(force=False)
+    except Exception:
+        pass  # Cleanup is best-effort; never let it fail the batch.
+
+
+def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: str, batch_id: str):
+    """Retry a single failed video. Runs in its own thread."""
     idx = video["index"]
 
     def log(msg: str, v=video):
@@ -513,90 +487,41 @@ def process_video_job(video: dict, source_lang: str, target_lang: str, prompt: s
         video["elapsed_seconds"] = 0
         video["transcript_file"] = None
         video["transcript_xlsx_file"] = None
-        video["translation_file"] = None
-        video["segment_count"] = 0
-        video["current_segment"] = 0
+        video["translation_file"] = None  # always None now; preserved for compatibility
 
     start_time = time.time()
     local_video_path: Path | None = None
-    segment_video_paths: list[Path] = []
+    segment_video_path: Path | None = None
 
     try:
         tmp_name = f"batch_{batch_id}_video_{idx}.mp4"
         tmp_path = DOWNLOADS_DIR / tmp_name
 
+        # If the downloaded file from the previous failed attempt still exists
+        # and looks healthy, reuse it.
         if tmp_path.exists() and tmp_path.stat().st_size > 0:
             log(f"Reusing previously downloaded file: {tmp_path.name}")
             local_video_path = tmp_path
         else:
             local_video_path = download_drive_video(video["link"], tmp_path, log)
 
+        # If a time range was requested, it will be passed in the prompt.
+        start_sec = video.get("segment_start")
+        end_sec = video.get("segment_end")
+
         with BATCH_LOCK:
-            video["step"] = "Preparing segments"
-
-        full_duration = get_video_duration_seconds(local_video_path)
-        requested_start = video.get("segment_start")
-        requested_end = video.get("segment_end")
-        effective_start = requested_start if requested_start is not None else 0
-        effective_end = requested_end if requested_end is not None else full_duration
-        effective_end = min(effective_end, full_duration)
-
-        if effective_start >= effective_end:
-            raise RuntimeError(
-                "The requested time range does not contain any video after clipping "
-                "to the file duration."
-            )
-
-        segment_ranges = build_segment_ranges(effective_start, effective_end)
-        with BATCH_LOCK:
-            video["segment_count"] = len(segment_ranges)
-
-        log(
-            f"Video duration: {format_mmss(full_duration)}. "
-            f"Processing {len(segment_ranges)} segment(s) of 5:00 with 0:15 overlap."
+            video["step"] = "Transcribing"
+        transcript = transcribe.transcribe_video(
+            str(local_video_path),
+            source_language=source_lang,
+            video_title=video.get("title", ""),
+            video_context=video.get("context", ""),
+            target_language=target_lang,
+            start_time=format_mmss(start_sec),
+            end_time=format_mmss(end_sec),
+            prompt=prompt,
+            log_callback=log,
         )
-
-        segment_transcripts = []
-        for segment_number, (segment_start, segment_end) in enumerate(segment_ranges, start=1):
-            with BATCH_LOCK:
-                video["current_segment"] = segment_number
-                video["step"] = f"Transcribing segment {segment_number}/{len(segment_ranges)}"
-
-            segment_filename = (
-                f"batch_{batch_id}_video_{idx}_segment_{segment_number}.mp4"
-            )
-            segment_video_path = DOWNLOADS_DIR / segment_filename
-            extract_video_segment(
-                source_path=local_video_path,
-                output_path=segment_video_path,
-                start_sec=segment_start,
-                end_sec=segment_end,
-                log=log,
-            )
-            segment_video_paths.append(segment_video_path)
-
-            log(
-                f"Sending segment {segment_number}/{len(segment_ranges)} to Gemini "
-                f"({format_mmss(segment_start)}-{format_mmss(segment_end)})."
-            )
-            segment_transcript = transcribe.transcribe_video(
-                str(segment_video_path),
-                source_language=source_lang,
-                video_title=video.get("title", ""),
-                video_context=video.get("context", ""),
-                target_language=target_lang,
-                prompt=prompt,
-                log_callback=log,
-            )
-            segment_transcripts.append(
-                shift_transcript_timestamps(segment_transcript, segment_start)
-            )
-            log(f"Segment {segment_number}/{len(segment_ranges)} transcription received.")
-
-        with BATCH_LOCK:
-            video["step"] = "Merging transcripts"
-
-        transcript = merge_transcript_segments(segment_transcripts)
         transcript_filename = f"{filename_prefix(video)}_{safe_slug(source_lang)}_transcript.csv"
         write_output_file(transcript, transcript_filename)
         with BATCH_LOCK:
@@ -612,25 +537,18 @@ def process_video_job(video: dict, source_lang: str, target_lang: str, prompt: s
         except Exception as e:
             log(f"Warning: could not generate XLSX: {e}")
 
-        if len(transcript) < 2000:
-            log(
-                "WARNING: transcript is under 2000 characters, which is short for "
-                "a typical episode. You may want to retry."
-            )
-
-        for segment_video_path in segment_video_paths:
-            try:
-                if segment_video_path.exists():
-                    segment_video_path.unlink()
-            except Exception as e:
-                log(f"Warning: could not delete local segment file {segment_video_path.name}: {e}")
+        # NOTE: Translation step intentionally removed.
 
         try:
             if local_video_path and local_video_path.exists():
                 local_video_path.unlink()
-                log("Cleaned up local video file.")
-        except Exception as e:
-            log(f"Warning: could not delete local video file: {e}")
+        except Exception:
+            pass
+        try:
+            if segment_video_path and segment_video_path.exists():
+                segment_video_path.unlink()
+        except Exception:
+            pass
 
         with BATCH_LOCK:
             video["status"] = "done"
@@ -639,12 +557,6 @@ def process_video_job(video: dict, source_lang: str, target_lang: str, prompt: s
             video["elapsed_seconds"] = int(time.time() - start_time)
 
     except Exception as e:
-        for segment_video_path in segment_video_paths:
-            try:
-                if segment_video_path.exists():
-                    segment_video_path.unlink()
-            except Exception:
-                pass
         log(f"ERROR: {e}")
         with BATCH_LOCK:
             video["status"] = "failed"
@@ -652,44 +564,6 @@ def process_video_job(video: dict, source_lang: str, target_lang: str, prompt: s
             video["error"] = str(e)
             video["finished_at"] = datetime.now().isoformat(timespec="seconds")
             video["elapsed_seconds"] = int(time.time() - start_time)
-
-
-# -------------------------------------------------------------------
-# Background worker
-# -------------------------------------------------------------------
-def run_batch(batch_id: str):
-    """Process all videos in the current batch sequentially."""
-    global BATCH
-
-    with BATCH_LOCK:
-        if not BATCH or BATCH["id"] != batch_id:
-            return
-        videos = BATCH["videos"]
-        source_lang = BATCH["source_language"]
-        target_lang = BATCH.get("target_language", "")
-        prompt = BATCH["prompt"]
-
-    for video in videos:
-        process_video_job(video, source_lang, target_lang, prompt, batch_id)
-
-    with BATCH_LOCK:
-        if BATCH and BATCH["id"] == batch_id:
-            BATCH["status"] = "done"
-            BATCH["finished_at"] = datetime.now().isoformat(timespec="seconds")
-
-    # Auto-cleanup: any download files still sitting around that belong to
-    # DONE videos (not failed ones that might be retried) should go.
-    # The per-video success path already deletes its own file, so this is
-    # a belt-and-braces sweep for anything the success path missed (e.g. crash).
-    try:
-        cleanup_downloads(force=False)
-    except Exception:
-        pass  # Cleanup is best-effort; never let it fail the batch.
-
-
-def retry_single_video(video: dict, source_lang: str, target_lang: str, prompt: str, batch_id: str):
-    """Retry a single failed video. Runs in its own thread."""
-    process_video_job(video, source_lang, target_lang, prompt, batch_id)
 
 
 # -------------------------------------------------------------------
@@ -805,8 +679,6 @@ def start():
             "transcript_file": None,
             "transcript_xlsx_file": None,
             "translation_file": None,
-            "segment_count": 0,
-            "current_segment": 0,
             "log": [],
         })
 
