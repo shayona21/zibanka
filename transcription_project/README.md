@@ -1,6 +1,6 @@
 # Video Transcriber
 
-A simple local web tool for transcribing Google Drive videos and optionally translating the transcript between Indian languages, using Google Gemini 2.5 Pro.
+A simple local web tool for transcribing Google Drive videos and optionally translating the transcript between Indian languages, using Google Gemini 2.5 Flash.
 
 ## Features
 
