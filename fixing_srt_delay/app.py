@@ -6,7 +6,7 @@ from uuid import uuid4
 from flask import Flask, jsonify, render_template, request, send_file, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
-from main import process_srt_file
+from main import get_output_file_name, process_srt_file
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -228,12 +228,10 @@ def process():
 
     for index in range(1, 4):
         uploaded_file = request.files.get(f"srt_file_{index}")
-        output_file_name = request.form.get(f"output_file_name_{index}", "").strip()
 
         has_file = bool(uploaded_file and uploaded_file.filename)
-        has_output_name = bool(output_file_name)
 
-        if not has_file and not has_output_name:
+        if not has_file:
             continue
 
         if has_file and not allowed_file(uploaded_file.filename):
@@ -244,26 +242,9 @@ def process():
                 input_languages=SUPPORTED_INPUT_LANGUAGES,
             ), 400
 
-        if has_file and not has_output_name:
-            return render_template(
-                "index.html",
-                active_job=None,
-                form_error=f"Please enter an output file name for file {index}.",
-                input_languages=SUPPORTED_INPUT_LANGUAGES,
-            ), 400
-
-        if has_output_name and not has_file:
-            return render_template(
-                "index.html",
-                active_job=None,
-                form_error=f"Please upload an SRT file for file {index}.",
-                input_languages=SUPPORTED_INPUT_LANGUAGES,
-            ), 400
-
         pending_files.append(
             {
                 "uploaded_file": uploaded_file,
-                "requested_output_file_name": output_file_name,
             }
         )
 
@@ -327,7 +308,7 @@ def process():
         file_entries.append(
             {
                 "filename": safe_name,
-                "requested_output_file_name": pending_file["requested_output_file_name"],
+                "requested_output_file_name": get_output_file_name(safe_name),
                 "upload_path": str(upload_path),
                 "status": "queued",
                 "output_file_name": "",

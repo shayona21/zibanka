@@ -229,14 +229,12 @@ def emit_progress(progress_callback, current_batch, total_batches, message):
 
 def get_output_file_name(file_path, requested_name=None):
     input_path = Path(file_path)
+    source_stem = Path(requested_name).stem if requested_name else input_path.stem
+    safe_stem = secure_filename(source_stem) or "output"
+    if safe_stem.endswith("_output"):
+        return f"{safe_stem}.srt"
 
-    if requested_name:
-        requested_stem = Path(requested_name).stem
-        safe_stem = secure_filename(requested_stem)
-        if safe_stem:
-            return f"{safe_stem}.srt"
-
-    return f"{input_path.stem}_processed.srt"
+    return f"{safe_stem}_output.srt"
 
 #running transliteration for each 50 row batch in an episode dialogue SRT file
 #%%

@@ -117,7 +117,7 @@
 
         .file-row {
             display: grid;
-            grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+            grid-template-columns: minmax(0, 1fr);
             gap: 12px;
             align-items: end;
             padding: 12px;
@@ -388,15 +388,6 @@
                                 <label for="srt_file_{{ index }}">SRT file {{ index }}</label>
                                 <input id="srt_file_{{ index }}" name="srt_file_{{ index }}" type="file" accept=".srt">
                             </div>
-                            <div class="field">
-                                <label for="output_file_name_{{ index }}">Output file name {{ index }}</label>
-                                <input
-                                    id="output_file_name_{{ index }}"
-                                    name="output_file_name_{{ index }}"
-                                    type="text"
-                                    placeholder="episode_{{ index }}_kannada"
-                                >
-                            </div>
                         </div>
                         {% endfor %}
                     </div>
@@ -408,7 +399,7 @@
 
                     <div class="button-row">
                         <button type="submit">Process</button>
-                        <span class="hint">Upload up to 3 SRT files. Each uploaded file needs its own output file name. Files are processed one after another, and you can enter each name with or without `.srt`. Batch size must be between 1 and 100.</span>
+                        <span class="hint">Upload up to 3 SRT files. Files are processed one after another and saved as the original file name followed by `_output.srt`. Batch size must be between 1 and 100.</span>
                     </div>
                 </form>
 
