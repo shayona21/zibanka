@@ -67,6 +67,7 @@
         .brand {
             display: inline-flex;
             align-items: center;
+            margin-left: auto;
         }
 
         .brand img {
@@ -88,34 +89,14 @@
             grid-template-columns: minmax(0, 1.6fr) minmax(250px, 0.7fr);
             gap: 56px;
             align-items: end;
-            padding: 92px 0 64px;
-        }
-
-        .eyebrow {
-            display: inline-flex;
-            align-items: center;
-            gap: 9px;
-            margin: 0 0 20px;
-            color: var(--navy-800);
-            font-size: 0.78rem;
-            font-weight: 800;
-            letter-spacing: 0.13em;
-            text-transform: uppercase;
-        }
-
-        .eyebrow::before {
-            width: 28px;
-            height: 3px;
-            border-radius: 99px;
-            background: var(--orange);
-            content: "";
+            padding: 76px 0 64px;
         }
 
         h1 {
             max-width: 780px;
             margin: 0;
             color: var(--navy-950);
-            font-size: clamp(3.25rem, 7.6vw, 6.8rem);
+            font-size: clamp(1.95rem, 4.56vw, 4.08rem);
             font-weight: 760;
             letter-spacing: -0.065em;
             line-height: 0.94;
@@ -382,11 +363,11 @@
             }
 
             .hero {
-                padding: 54px 0 48px;
+                padding: 48px 0;
             }
 
             h1 {
-                font-size: clamp(3rem, 17vw, 4.5rem);
+                font-size: clamp(1.8rem, 10.2vw, 2.7rem);
             }
 
             .section-heading {
@@ -444,17 +425,16 @@
 <body>
     <header class="site-header">
         <nav class="nav" aria-label="Main navigation">
+            <span class="nav-label">AI Solutions</span>
             <a class="brand" href="{{ url_for('index') }}" aria-label="Zibanka AI Agents home">
                 <img src="{{ url_for('logo') }}" alt="Zibanka">
             </a>
-            <span class="nav-label">AI Solutions</span>
         </nav>
     </header>
 
     <main>
         <section class="hero" aria-labelledby="page-title">
             <div class="hero-copy">
-                <p class="eyebrow">One workspace. Every tool.</p>
                 <h1 id="page-title">AI Agents</h1>
                 <p>A central collection of Zibanka tools for video transcription, subtitle translation, and script conversion.</p>
             </div>
