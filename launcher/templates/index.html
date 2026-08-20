@@ -229,6 +229,41 @@
             outline-offset: 3px;
         }
 
+        .tool-card--unavailable {
+            cursor: not-allowed;
+        }
+
+        .tool-card--unavailable:hover {
+            border-color: var(--line);
+            box-shadow: 0 6px 20px rgba(5, 43, 76, 0.035);
+            transform: none;
+        }
+
+        .tool-card--unavailable:hover::before {
+            opacity: 0;
+            transform: scaleY(0.55);
+        }
+
+        .status-ribbon {
+            position: absolute;
+            z-index: 2;
+            top: 20px;
+            right: -38px;
+            width: 158px;
+            padding: 7px 10px;
+            border-block: 1px solid rgba(151, 89, 8, 0.18);
+            color: #744508;
+            background: #ffe8bd;
+            box-shadow: 0 4px 12px rgba(116, 69, 8, 0.09);
+            font-size: 0.63rem;
+            font-weight: 850;
+            letter-spacing: 0.08em;
+            line-height: 1;
+            text-align: center;
+            text-transform: uppercase;
+            transform: rotate(35deg);
+        }
+
         .tool-icon {
             display: grid;
             width: 52px;
@@ -452,7 +487,12 @@
 
             <div class="tool-grid">
                 {% for tool in tools %}
+                {% if tool.available is defined and not tool.available %}
+                <article class="tool-card tool-card--unavailable" aria-label="{{ tool.name }} — under construction">
+                    <span class="status-ribbon">{{ tool.status }}</span>
+                {% else %}
                 <a class="tool-card" href="{{ tool.url }}" target="_blank" rel="noopener noreferrer">
+                {% endif %}
                     <span class="tool-icon" aria-hidden="true">
                         {% if tool.icon == "video" %}
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="14" height="14" rx="2"/><path d="m17 10 4-2v8l-4-2z"/><path d="m9 9 4 3-4 3z"/></svg>
@@ -470,12 +510,20 @@
                         <span class="tool-category">{{ tool.category }}</span>
                         <h3>{{ tool.name }}</h3>
                         <span class="tool-description">{{ tool.description }}</span>
+                        {% if tool.available is not defined or tool.available %}
                         <span class="launch-label">Launch tool</span>
+                        {% endif %}
                     </div>
+                    {% if tool.available is not defined or tool.available %}
                     <span class="card-arrow" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>
                     </span>
+                    {% endif %}
+                {% if tool.available is defined and not tool.available %}
+                </article>
+                {% else %}
                 </a>
+                {% endif %}
                 {% endfor %}
             </div>
         </section>

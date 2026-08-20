@@ -21,17 +21,19 @@ TOOLS = (
         "url": "http://35.225.88.95:5006",
         "category": "Transcription",
         "icon": "batch",
+        "available": False,
+        "status": "Under construction",
     },
     {
-        "name": "English to German Subtitle Translation (With Context)",
-        "description": "Translate English subtitles into German while preserving context.",
+        "name": "English to German Translation",
+        "description": "Translate English subtitles into German, with additional context input for more accurate subtitle translation.",
         "url": "http://35.225.88.95:5003",
         "category": "Translation",
         "icon": "language",
     },
     {
-        "name": "English to Malay Subtitle Translation (With Context)",
-        "description": "Translate English subtitles into Malay while preserving context.",
+        "name": "English to Malay Translation",
+        "description": "Translate English subtitles into Malay, with additional context input for more accurate subtitle translation.",
         "url": "http://35.225.88.95:5040",
         "category": "Translation",
         "icon": "language",
@@ -66,4 +68,4 @@ def logo():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050)
+    app.run(host="0.0.0.0", port=5040)
