@@ -52,6 +52,13 @@ TOOLS = (
         "category": "Conversion",
         "icon": "script",
     },
+    {
+        "name": "Audio Description Text to Speech",
+        "description": "Convert audio description text into natural-sounding speech for accessible media.",
+        "url": "http://35.225.88.95:5070/",
+        "category": "Audio Description",
+        "icon": "audio",
+    },
 )
 
 app = Flask(__name__)
