@@ -9,6 +9,13 @@ LOGO_DIR = BASE_DIR.parent / "fixing_srt_delay"
 
 TOOLS = (
     {
+        "name": "Dubbing Tool",
+        "description": "Turn dialogue spreadsheets into synchronized voice tracks for each episode and character.",
+        "url": "http://136.113.166.224:5071",
+        "category": "Dubbing",
+        "icon": "audio",
+    },
+    {
         "name": "Video Transcription",
         "description": "Turn video content into a clear, ready-to-use transcript.",
         "url": "http://136.113.166.224:5000",
