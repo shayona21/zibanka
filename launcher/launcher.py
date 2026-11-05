@@ -16,6 +16,13 @@ TOOLS = (
         "icon": "audio",
     },
     {
+        "name": "Dubbing Quality Check",
+        "description": "Preview each character's dubbed audio against the video and regenerate individual lines before delivery.",
+        "url": "http://136.113.166.224:5072",
+        "category": "Dubbing",
+        "icon": "video",
+    },
+    {
         "name": "Video Transcription",
         "description": "Turn video content into a clear, ready-to-use transcript.",
         "url": "http://136.113.166.224:5000",
@@ -23,26 +30,17 @@ TOOLS = (
         "icon": "video",
     },
     {
-        "name": "Video Transcription (in batches)",
-        "description": "Transcribe multiple video files together in one streamlined workflow.",
-        "url": "http://136.113.166.224:5006",
-        "category": "Transcription",
-        "icon": "batch",
-        "available": False,
-        "status": "Under construction",
-    },
-    {
-        "name": "English to German Translation",
+        "name": "German Subtitling",
         "description": "Translate English subtitles into German, with additional context input for more accurate subtitle translation.",
         "url": "http://136.113.166.224:5003",
-        "category": "Translation",
+        "category": "Subtitling",
         "icon": "language",
     },
     {
-        "name": "English to Malay Translation",
+        "name": "Malay Subtitling",
         "description": "Translate English subtitles into Malay, with additional context input for more accurate subtitle translation.",
         "url": "http://136.113.166.224:5040",
-        "category": "Translation",
+        "category": "Subtitling",
         "icon": "language",
     },
     {
@@ -60,7 +58,7 @@ TOOLS = (
         "icon": "script",
     },
     {
-        "name": "Audio Description Text to Speech",
+        "name": "Audio Description",
         "description": "Convert audio description text into natural-sounding speech for accessible media.",
         "url": "http://136.113.166.224:5070/",
         "category": "Audio Description",
@@ -68,12 +66,40 @@ TOOLS = (
     },
 )
 
+# Order and icon of each product group on the page.
+GROUPS = (
+    ("Dubbing", "audio"),
+    ("Audio Description", "audio"),
+    ("Subtitling", "language"),
+    ("Translation", "subtitles"),
+    ("Transcription", "video"),
+    ("Conversion", "script"),
+)
+
+# Address shown under Contact. Leave empty to hide it.
+CONTACT_EMAIL = "manoj.gupta@zibanka.com"
+
+
+def grouped_tools():
+    groups = []
+    for name, icon in GROUPS:
+        tools = [t for t in TOOLS if t["category"] == name]
+        if tools:
+            groups.append({"name": name, "icon": icon, "tools": tools})
+    return groups
+
+
 app = Flask(__name__)
 
 
 @app.get("/")
 def index():
-    return render_template("index.html", tools=TOOLS)
+    return render_template(
+        "index.html",
+        groups=grouped_tools(),
+        contact_email=CONTACT_EMAIL,
+        qc_url=next((t["url"] for t in TOOLS if t["name"] == "Dubbing Quality Check"), None),
+    )
 
 
 @app.get("/assets/zibanka-logo.jpeg")
